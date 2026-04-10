@@ -245,7 +245,9 @@ class AiClient {
         '1. [follow-up question]\n'
         '2. [follow-up question]\n'
         '3. [follow-up question]\n\n'
-        'Questions should be specific and lead somewhere surprising.';
+        'Questions should be simple and natural — the kind a curious person '
+        'might genuinely wonder after reading this. No jargon, no academic framing. '
+        'Think "what happened next?" or "why did that happen?" not niche sub-topics.';
 
     yield* _stream(prompt);
   }
@@ -280,7 +282,10 @@ class AiClient {
         'QUESTIONS:\n'
         '1. [follow-up question]\n'
         '2. [follow-up question]\n'
-        '3. [follow-up question]';
+        '3. [follow-up question]\n\n'
+        'Questions should be simple and natural — the kind a curious person '
+        'might genuinely wonder after reading this. No jargon, no academic framing. '
+        'Think "what happened next?" or "why did that happen?" not niche sub-topics.';
 
     yield* _stream(prompt, systemOverride: _systemGuarded(originalFact));
   }

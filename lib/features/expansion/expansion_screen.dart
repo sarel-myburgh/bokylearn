@@ -819,11 +819,12 @@ class _ExplanationDialogState extends State<_ExplanationDialog> {
   String _text = '';
   bool _started = false;
   bool _done = false;
+  StreamSubscription<String>? _subscription;
 
   @override
   void initState() {
     super.initState();
-    widget.client
+    _subscription = widget.client
         .explainSelection(widget.selectedText)
         .listen(
           (chunk) {
@@ -833,6 +834,12 @@ class _ExplanationDialogState extends State<_ExplanationDialog> {
           onDone: () { if (mounted) setState(() => _done = true); },
           onError: (_) { if (mounted) setState(() => _done = true); },
         );
+  }
+
+  @override
+  void dispose() {
+    _subscription?.cancel();
+    super.dispose();
   }
 
   @override

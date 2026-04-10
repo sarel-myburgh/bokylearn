@@ -156,9 +156,9 @@ class Fact extends HiveObject {
       source:      src,
       mature:      (row['mature'] as int? ?? 0) == 1,
       scrapedAt:   row['scraped_at'] as String?,
-      imageUrl:     _normalizeImageUrl(row['image_url'] as String?),
-      imageSource:  row['image_url'] != null ? 'Wikimedia Commons' : null,
-      imageCaption: row['image_caption'] as String?,
+      imageUrl:     _resolvedImageUrl(row['image_url'] as String?, row['image_caption'] as String?),
+      imageSource:  _resolvedImageUrl(row['image_url'] as String?, row['image_caption'] as String?) != null ? 'Wikimedia Commons' : null,
+      imageCaption: _resolvedImageCaption(row['image_caption'] as String?),
       credit:      credit,
       creditUrl:   creditUrl,
       creditLogoUrl: 'https://en.wikipedia.org/favicon.ico',
@@ -214,6 +214,17 @@ class Fact extends HiveObject {
 
   static String _fixPunctSpacing(String text) =>
       text.replaceAllMapped(RegExp(r' ([,;:!?.])'), (m) => m.group(1)!);
+
+  // Returns null if the caption marks the image as a placeholder (no real image).
+  static bool _isPlaceholderCaption(String? caption) =>
+      caption != null &&
+      caption.toLowerCase().contains('no image available');
+
+  static String? _resolvedImageUrl(String? url, String? caption) =>
+      _isPlaceholderCaption(caption) ? null : _normalizeImageUrl(url);
+
+  static String? _resolvedImageCaption(String? caption) =>
+      _isPlaceholderCaption(caption) ? null : caption;
 
   static String? _normalizeImageUrl(String? url) {
     if (url == null || url.isEmpty) return null;

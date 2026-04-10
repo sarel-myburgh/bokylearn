@@ -31,7 +31,42 @@ class FactsFetcher {
   // Maximum number of month files downloaded simultaneously.
   static const int _concurrency = 8;
 
-  // ── Public entry point ───────────────────────────────────────────────────────
+  // ── Public entry points ──────────────────────────────────────────────────────
+
+  // Downloads just enough months to populate an initial feed on first launch:
+  // the 5 most recent DYK months + today's TIH month.
+  // Call this on first launch, then call sync() in the background for the rest.
+  static Future<int> quickSync() async {
+    final available = await _fetchManifest();
+    final localVersions = FactsDb.loadedMonthVersions;
+
+    const tihNames = ['Jan','Feb','Mar','Apr','May','Jun',
+                      'Jul','Aug','Sep','Oct','Nov','Dec'];
+    final tihKey = 'tih_${tihNames[DateTime.now().month - 1]}';
+
+    final dykKeys = available.keys
+        .where((k) => k.startsWith('dyk_'))
+        .toList()
+      ..sort();
+    final priorityKeys = [
+      ...dykKeys.reversed.take(5),
+      tihKey,
+    ].where((k) => available.containsKey(k) && !localVersions.containsKey(k))
+     .toList();
+
+    if (priorityKeys.isEmpty) return 0;
+
+    int added = 0;
+    for (int i = 0; i < priorityKeys.length; i += _concurrency) {
+      final batch = priorityKeys.skip(i).take(_concurrency).toList();
+      final results = await Future.wait(
+        batch.map((k) => _fetchMonth(k, version: available[k]!)),
+        eagerError: false,
+      );
+      for (final r in results) { if (r != null) added += r; }
+    }
+    return added;
+  }
 
   // Syncs the local DB with the remote facts repo.
   //

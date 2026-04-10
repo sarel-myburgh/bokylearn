@@ -55,9 +55,11 @@ class FeedNotifier extends StateNotifier<AsyncValue<List<Fact>>> {
       }
 
       if (FactsDb.totalFacts == 0) {
-        // First launch (or post-schema-wipe) — must sync before showing anything.
-        await FactsFetcher.sync();
+        // First launch (or post-schema-wipe) — download just enough to fill
+        // the initial feed, then sync the rest in the background.
+        await FactsFetcher.quickSync();
         _loadMore();
+        _syncInBackground();
       } else {
         // Returning user — show feed immediately, sync new months in background.
         _loadMore();
