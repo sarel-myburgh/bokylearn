@@ -318,22 +318,52 @@ class FactsDb {
     final rng = Random();
 
     final today = DateTime.now();
-    final candidates = _cache.values.where((f) {
+    bool passesBase(Fact f) {
       if (seenIds.contains(f.id)) return false;
       if (excludeMature && f.mature) return false;
       // TIH facts only appear on their specific calendar day.
       if (f.source == 'tih') {
         if (f.tihMonth != today.month || f.tihDay != today.day) return false;
       }
-      if (tags.isEmpty) return true;
-      return f.tags.any((t) => tags.contains(t));
-    }).toList();
+      return true;
+    }
 
-    final scored = candidates.map((f) {
-      final tagWeights = f.tags.map((t) => _weights.get(t) ?? 1.0);
-      final avg = tagWeights.isEmpty
+    final base = _cache.values.where(passesBase).toList();
+
+    // No interests chosen → purely random feed.
+    if (tags.isEmpty) {
+      return _scoreAndTake(base, rng, tags, limit);
+    }
+
+    final curated =
+        base.where((f) => f.tags.any((t) => tags.contains(t))).toList();
+
+    // When interests are chosen we curate, but if few facts match we top up
+    // with random unseen facts so the feed never falsely reports exhaustion.
+    final combined = curated.length >= limit
+        ? curated
+        : [...curated, ...base.where((f) => !curated.contains(f))];
+
+    return _scoreAndTake(combined, rng, tags, limit);
+  }
+
+  // Scores facts and returns the top [limit].
+  // Facts matching an interest use their affinity-weight average; facts with no
+  // matching tags score at the 1.0 baseline, keeping curated facts ahead.
+  static List<Fact> _scoreAndTake(
+    List<Fact> facts,
+    Random rng,
+    List<String> tags,
+    int limit,
+  ) {
+    final scored = facts.map((f) {
+      final matching = f.tags.where((t) => tags.contains(t));
+      final avg = matching.isEmpty
           ? 1.0
-          : tagWeights.reduce((a, b) => a + b) / tagWeights.length;
+          : matching
+                  .map((t) => _weights.get(t) ?? 1.0)
+                  .reduce((a, b) => a + b) /
+              matching.length;
       return (fact: f, score: rng.nextDouble() * avg);
     }).toList();
 

@@ -1,21 +1,19 @@
-// ─────────────────────────────────────────────────────────────────────────────
-// settings_screen.dart — User preferences and API key configuration
-//
-// Sections (top to bottom):
-//   1. AI Provider dropdown (OpenRouter / Anthropic / Google AI Studio / Ollama)
-//   2. API key / URL field — only the field for the selected provider is shown.
-//   3. Model selector — OpenRouter: searchable list; others: fixed dropdown.
-//   4. Mature content toggle.
-//   5. Track seen facts toggle.
-//   6. Interests — autocomplete from DB tags; deletable chips.
-// ─────────────────────────────────────────────────────────────────────────────
+import 'dart:convert';
 
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
-import '../../data/local/app_settings.dart';
-import '../../data/local/facts_db.dart';
-import '../../data/remote/openrouter_client.dart';
+import 'package:http/http.dart' as http;
+
 import '../../core/constants.dart';
+import '../../data/local/app_settings.dart';
+import '../../data/remote/model_client.dart';
+
+class TagCategory {
+  final String group;
+  final List<String> tags;
+
+  const TagCategory({required this.group, required this.tags});
+}
 
 class SettingsScreen extends ConsumerStatefulWidget {
   const SettingsScreen({super.key});
@@ -25,61 +23,263 @@ class SettingsScreen extends ConsumerStatefulWidget {
 }
 
 class _SettingsScreenState extends ConsumerState<SettingsScreen> {
-  // ── Key / URL controllers (one per provider) ────────────────────────────────
-  final _orKeyController       = TextEditingController(); // OpenRouter
-  final _anthropicKeyController = TextEditingController(); // Anthropic
-  final _googleKeyController   = TextEditingController(); // Gemini
-  final _ollamaUrlController   = TextEditingController(); // Ollama base URL
-  final _ollamaModelController = TextEditingController(); // Ollama model name
+  final _openAiController = TextEditingController();
+  final _openRouterController = TextEditingController();
+  final _anthropicController = TextEditingController();
+  final _geminiController = TextEditingController();
+  final _ollamaCloudController = TextEditingController();
+  final _opencodeGoController = TextEditingController();
+  final _ollamaController = TextEditingController();
 
-  // ── OpenRouter model search ──────────────────────────────────────────────────
-  final _modelController = TextEditingController();
-  List<OpenRouterModel> _models = [];
-  List<OpenRouterModel> _filteredModels = [];
-  bool _loadingModels = false;
-  String? _modelError;
+  final Map<AiProvider, List<ModelInfo>> _models = {};
+  final Map<AiProvider, bool> _loadingModels = {};
+  final Map<AiProvider, String?> _modelErrors = {};
+  final Map<AiProvider, bool> _keyObscured = {
+    for (final provider in AiProvider.values) provider: true,
+  };
 
-  // ── Key visibility toggles ──────────────────────────────────────────────────
-  bool _orKeyObscured       = true;
-  bool _anthropicKeyObscured = true;
-  bool _googleKeyObscured   = true;
-
-  // ── Interests ───────────────────────────────────────────────────────────────
   late List<String> _interests;
-  late List<String> _allTags; // autocomplete source from DB
+  List<TagCategory> _categories = [];
+  bool _loadingTags = true;
 
   @override
   void initState() {
     super.initState();
     final settings = ref.read(appSettingsProvider);
-    _orKeyController.text        = settings.apiKey ?? '';
-    _anthropicKeyController.text = settings.anthropicApiKey ?? '';
-    _googleKeyController.text    = settings.googleApiKey ?? '';
-    _ollamaUrlController.text    = settings.ollamaBaseUrl;
-    _ollamaModelController.text  = settings.selectedOllamaModel;
-    _modelController.text        = settings.selectedModel;
-    _interests = List.from(settings.interests);
-    _allTags   = FactsDb.allTags..sort();
-    _modelController.addListener(_filterModels);
+    _openAiController.text = settings.openAiApiKey ?? '';
+    _openRouterController.text = settings.openRouterApiKey ?? '';
+    _anthropicController.text = settings.anthropicApiKey ?? '';
+    _geminiController.text = settings.googleApiKey ?? '';
+    _ollamaCloudController.text = settings.ollamaCloudApiKey ?? '';
+    _opencodeGoController.text = settings.opencodeGoApiKey ?? '';
+    _ollamaController.text = settings.ollamaBaseUrl;
+    _interests = List.of(settings.interests);
+    _fetchTags();
   }
 
   @override
   void dispose() {
-    _orKeyController.dispose();
-    _anthropicKeyController.dispose();
-    _googleKeyController.dispose();
-    _ollamaUrlController.dispose();
-    _ollamaModelController.dispose();
-    _modelController.dispose();
+    _openAiController.dispose();
+    _openRouterController.dispose();
+    _anthropicController.dispose();
+    _geminiController.dispose();
+    _ollamaCloudController.dispose();
+    _opencodeGoController.dispose();
+    _ollamaController.dispose();
     super.dispose();
   }
 
-  // ── Interests ────────────────────────────────────────────────────────────────
+  Future<void> _fetchTags() async {
+    try {
+      final response = await http
+          .get(Uri.parse(AppConstants.tagsJsonUrl))
+          .timeout(const Duration(seconds: 15));
+      if (response.statusCode < 200 || response.statusCode >= 300) {
+        throw Exception('Tag request failed (${response.statusCode})');
+      }
+      final data = jsonDecode(response.body) as Map<String, dynamic>;
+      final raw = data['categories'] as List<dynamic>? ?? const [];
+      final categories = raw.map((item) {
+        final category = item as Map<String, dynamic>;
+        return TagCategory(
+          group: category['group'] as String,
+          tags: (category['tags'] as List<dynamic>).cast<String>(),
+        );
+      }).toList();
+      if (mounted) {
+        setState(() {
+          _categories = categories;
+          _loadingTags = false;
+        });
+      }
+    } catch (_) {
+      if (mounted) setState(() => _loadingTags = false);
+    }
+  }
 
-  void _addInterest(String text) {
-    final t = text.trim();
-    if (t.isEmpty || _interests.contains(t)) return;
-    setState(() => _interests.add(t));
+  TextEditingController _controllerFor(AiProvider provider) =>
+      switch (provider) {
+        AiProvider.openAi => _openAiController,
+        AiProvider.openRouter => _openRouterController,
+        AiProvider.anthropic => _anthropicController,
+        AiProvider.gemini => _geminiController,
+        AiProvider.ollamaCloud => _ollamaCloudController,
+        AiProvider.opencodeGo => _opencodeGoController,
+        AiProvider.ollama => _ollamaController,
+      };
+
+  String _providerName(AiProvider provider) => switch (provider) {
+    AiProvider.openAi => 'OpenAI',
+    AiProvider.openRouter => 'OpenRouter',
+    AiProvider.anthropic => 'Anthropic',
+    AiProvider.gemini => 'Google Gemini',
+    AiProvider.ollamaCloud => 'Ollama Cloud',
+    AiProvider.opencodeGo => 'OpenCode Go',
+    AiProvider.ollama => 'Ollama Local',
+  };
+
+  String _providerDescription(AiProvider provider) => switch (provider) {
+    AiProvider.openAi => 'Uses your OpenAI Platform API account and billing.',
+    AiProvider.openRouter => 'Uses your OpenRouter API key and model catalog.',
+    AiProvider.anthropic => 'Uses your Anthropic Console API account.',
+    AiProvider.gemini => 'Uses a Google AI Studio Gemini API key.',
+    AiProvider.ollamaCloud => 'Uses an Ollama Cloud API key from ollama.com.',
+    AiProvider.opencodeGo => 'Uses an active OpenCode Go subscription key.',
+    AiProvider.ollama => 'Connects directly to an Ollama server you control.',
+  };
+
+  String _keyHint(AiProvider provider) => switch (provider) {
+    AiProvider.openAi => 'sk-...',
+    AiProvider.openRouter => 'sk-or-...',
+    AiProvider.anthropic => 'sk-ant-...',
+    AiProvider.gemini => 'AIza...',
+    AiProvider.ollamaCloud => 'Ollama API key',
+    AiProvider.opencodeGo => 'OpenCode Go API key',
+    AiProvider.ollama => 'http://192.168.1.10:11434',
+  };
+
+  String _defaultModel(AiProvider provider) => switch (provider) {
+    AiProvider.openAi => AppConstants.defaultOpenAiModel,
+    AiProvider.openRouter => AppConstants.defaultOpenRouterModel,
+    AiProvider.anthropic => AppConstants.defaultAnthropicModel,
+    AiProvider.gemini => AppConstants.defaultGeminiModel,
+    AiProvider.ollamaCloud => AppConstants.defaultOllamaCloudModel,
+    AiProvider.opencodeGo => AppConstants.defaultOpencodeGoModel,
+    AiProvider.ollama => AppConstants.defaultOllamaModel,
+  };
+
+  String _selectedModel(AppSettingsState settings, AiProvider provider) =>
+      switch (provider) {
+        AiProvider.openAi => settings.selectedOpenAiModel,
+        AiProvider.openRouter => settings.selectedOpenRouterModel,
+        AiProvider.anthropic => settings.selectedAnthropicModel,
+        AiProvider.gemini => settings.selectedGeminiModel,
+        AiProvider.ollamaCloud => settings.selectedOllamaCloudModel,
+        AiProvider.opencodeGo => settings.selectedOpencodeGoModel,
+        AiProvider.ollama => settings.selectedOllamaModel,
+      };
+
+  String? _savedKey(AppSettingsState settings, AiProvider provider) =>
+      switch (provider) {
+        AiProvider.openAi => settings.openAiApiKey,
+        AiProvider.openRouter => settings.openRouterApiKey,
+        AiProvider.anthropic => settings.anthropicApiKey,
+        AiProvider.gemini => settings.googleApiKey,
+        AiProvider.ollamaCloud => settings.ollamaCloudApiKey,
+        AiProvider.opencodeGo => settings.opencodeGoApiKey,
+        AiProvider.ollama => settings.ollamaBaseUrl,
+      };
+
+  Future<void> _saveKey(AiProvider provider) async {
+    final key = _controllerFor(provider).text.trim();
+    if (key.isEmpty) return;
+    if (provider == AiProvider.ollama) {
+      final uri = Uri.tryParse(key);
+      if (uri == null ||
+          (uri.scheme != 'http' && uri.scheme != 'https') ||
+          uri.host.isEmpty) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('Enter a complete http:// or https:// server URL.'),
+          ),
+        );
+        return;
+      }
+    }
+    final notifier = ref.read(appSettingsProvider.notifier);
+    switch (provider) {
+      case AiProvider.openAi:
+        await notifier.setOpenAiApiKey(key);
+      case AiProvider.openRouter:
+        await notifier.setOpenRouterApiKey(key);
+      case AiProvider.anthropic:
+        await notifier.setAnthropicApiKey(key);
+      case AiProvider.gemini:
+        await notifier.setGoogleApiKey(key);
+      case AiProvider.ollamaCloud:
+        await notifier.setOllamaCloudApiKey(key);
+      case AiProvider.opencodeGo:
+        await notifier.setOpencodeGoApiKey(key);
+      case AiProvider.ollama:
+        await notifier.setOllamaBaseUrl(key.replaceFirst(RegExp(r'/+$'), ''));
+    }
+    if (!mounted) return;
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text(
+          provider == AiProvider.ollama
+              ? 'Ollama server saved'
+              : '${_providerName(provider)} key saved',
+        ),
+      ),
+    );
+    await _fetchModels(provider, key);
+  }
+
+  Future<void> _fetchModels(AiProvider provider, String key) async {
+    setState(() {
+      _loadingModels[provider] = true;
+      _modelErrors[provider] = null;
+    });
+    try {
+      final models = switch (provider) {
+        AiProvider.openAi => await ModelClient.fetchOpenAiModels(key),
+        AiProvider.openRouter => await ModelClient.fetchOpenRouterModels(key),
+        AiProvider.anthropic => await ModelClient.fetchAnthropicModels(key),
+        AiProvider.gemini => await ModelClient.fetchGeminiModels(key),
+        AiProvider.ollamaCloud => await ModelClient.fetchOllamaCloudModels(key),
+        AiProvider.opencodeGo => await ModelClient.fetchOpencodeGoModels(key),
+        AiProvider.ollama => await ModelClient.fetchOllamaModels(key),
+      };
+      if (models.isEmpty) throw Exception('No compatible models returned');
+      if (!mounted) return;
+      setState(() {
+        _models[provider] = models;
+        _loadingModels[provider] = false;
+      });
+      final settings = ref.read(appSettingsProvider);
+      final selected = _selectedModel(settings, provider);
+      if (!models.any((model) => model.id == selected)) {
+        final preferred =
+            models.any((model) => model.id == _defaultModel(provider))
+            ? _defaultModel(provider)
+            : models.first.id;
+        await _selectModel(provider, preferred);
+      }
+    } catch (_) {
+      if (!mounted) return;
+      setState(() {
+        _loadingModels[provider] = false;
+        _modelErrors[provider] =
+            'Could not load models. Check the key and subscription.';
+      });
+    }
+  }
+
+  Future<void> _selectModel(AiProvider provider, String model) async {
+    final notifier = ref.read(appSettingsProvider.notifier);
+    switch (provider) {
+      case AiProvider.openAi:
+        await notifier.setOpenAiModel(model);
+      case AiProvider.openRouter:
+        await notifier.setOpenRouterModel(model);
+      case AiProvider.anthropic:
+        await notifier.setAnthropicModel(model);
+      case AiProvider.gemini:
+        await notifier.setGeminiModel(model);
+      case AiProvider.ollamaCloud:
+        await notifier.setOllamaCloudModel(model);
+      case AiProvider.opencodeGo:
+        await notifier.setOpencodeGoModel(model);
+      case AiProvider.ollama:
+        await notifier.setOllamaModel(model);
+    }
+  }
+
+  void _addInterest(String value) {
+    final interest = value.trim();
+    if (interest.isEmpty || _interests.contains(interest)) return;
+    setState(() => _interests.add(interest));
     ref.read(appSettingsProvider.notifier).updateInterests(_interests);
   }
 
@@ -88,491 +288,237 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
     ref.read(appSettingsProvider.notifier).updateInterests(_interests);
   }
 
-  // ── OpenRouter model search ──────────────────────────────────────────────────
-
-  void _filterModels() {
-    final query = _modelController.text.toLowerCase();
-    setState(() {
-      _filteredModels = _models
-          .where((m) => m.id.toLowerCase().contains(query) || m.name.toLowerCase().contains(query))
-          .take(8)
-          .toList();
-    });
-  }
-
-  Future<void> _fetchModels(String key) async {
-    setState(() { _loadingModels = true; _modelError = null; });
-    try {
-      final models = await OpenRouterClient.fetchModels(key);
-      setState(() {
-        _models = models;
-        _filteredModels = models.take(8).toList();
-        _loadingModels = false;
-      });
-    } catch (_) {
-      setState(() {
-        _modelError = 'Could not load models. Check your API key.';
-        _loadingModels = false;
-      });
-    }
-  }
-
-  Future<void> _selectModel(OpenRouterModel model) async {
-    _modelController.text = model.id;
-    final focusScope = FocusScope.of(context);
-    await ref.read(appSettingsProvider.notifier).setModel(model.id);
-    if (!mounted) return;
-    setState(() => _filteredModels = []);
-    focusScope.unfocus();
-  }
-
-  // ── Key save helpers ─────────────────────────────────────────────────────────
-
-  Future<void> _saveOrKey() async {
-    final key = _orKeyController.text.trim();
-    if (key.isEmpty) return;
-    final messenger = ScaffoldMessenger.of(context);
-    await ref.read(appSettingsProvider.notifier).setApiKey(key);
-    if (!mounted) return;
-    messenger.showSnackBar(const SnackBar(content: Text('OpenRouter key saved')));
-    _fetchModels(key);
-  }
-
-  Future<void> _saveAnthropicKey() async {
-    final key = _anthropicKeyController.text.trim();
-    if (key.isEmpty) return;
-    final messenger = ScaffoldMessenger.of(context);
-    await ref.read(appSettingsProvider.notifier).setAnthropicApiKey(key);
-    if (!mounted) return;
-    messenger.showSnackBar(const SnackBar(content: Text('Anthropic key saved')));
-  }
-
-  Future<void> _saveGoogleKey() async {
-    final key = _googleKeyController.text.trim();
-    if (key.isEmpty) return;
-    final messenger = ScaffoldMessenger.of(context);
-    await ref.read(appSettingsProvider.notifier).setGoogleApiKey(key);
-    if (!mounted) return;
-    messenger.showSnackBar(const SnackBar(content: Text('Google AI Studio key saved')));
-  }
-
-  Future<void> _saveOllamaSettings() async {
-    final url   = _ollamaUrlController.text.trim();
-    final model = _ollamaModelController.text.trim();
-    final notifier = ref.read(appSettingsProvider.notifier);
-    if (url.isNotEmpty)   await notifier.setOllamaBaseUrl(url);
-    if (model.isNotEmpty) await notifier.setOllamaModel(model);
-    if (!mounted) return;
-    ScaffoldMessenger.of(context).showSnackBar(
-      const SnackBar(content: Text('Ollama settings saved')),
-    );
-  }
-
-  // ── Build ────────────────────────────────────────────────────────────────────
-
   @override
   Widget build(BuildContext context) {
     final settings = ref.watch(appSettingsProvider);
-    final theme    = Theme.of(context);
+    final provider = settings.provider;
+    final savedKey = _savedKey(settings, provider);
+    final models = _models[provider] ?? const <ModelInfo>[];
+    final selected = _selectedModel(settings, provider);
+    final dropdownValue = models.any((model) => model.id == selected)
+        ? selected
+        : null;
+    final theme = Theme.of(context);
 
     return Scaffold(
       appBar: AppBar(title: const Text('Settings')),
       body: ListView(
-        padding: const EdgeInsets.all(16),
+        padding: const EdgeInsets.all(20),
         children: [
-
-          // ── AI Provider ────────────────────────────────────────────────────
-          Text('AI Provider', style: theme.textTheme.titleMedium),
+          Text('AI provider', style: theme.textTheme.titleMedium),
           const SizedBox(height: 8),
           DropdownButtonFormField<AiProvider>(
-            initialValue: settings.provider,
+            initialValue: provider,
             decoration: const InputDecoration(border: OutlineInputBorder()),
-            items: const [
-              DropdownMenuItem(value: AiProvider.openRouter, child: Text('OpenRouter')),
-              DropdownMenuItem(value: AiProvider.anthropic,  child: Text('Anthropic')),
-              DropdownMenuItem(value: AiProvider.gemini,     child: Text('Google AI Studio (Gemini)')),
-              DropdownMenuItem(value: AiProvider.ollama,     child: Text('Ollama (local)')),
-            ],
-            onChanged: (p) {
-              if (p != null) ref.read(appSettingsProvider.notifier).setProvider(p);
+            items: AiProvider.values
+                .map(
+                  (item) => DropdownMenuItem(
+                    value: item,
+                    child: Text(_providerName(item)),
+                  ),
+                )
+                .toList(),
+            onChanged: (value) {
+              if (value != null) {
+                ref.read(appSettingsProvider.notifier).setProvider(value);
+              }
             },
           ),
-
-          const SizedBox(height: 24),
-
-          // ── Provider-specific key / URL field ──────────────────────────────
-          if (settings.provider == AiProvider.openRouter) ...[
-            _buildSectionLabel('OpenRouter API Key', 'Get a free key at openrouter.ai'),
-            const SizedBox(height: 8),
-            _buildKeyRow(_orKeyController, 'sk-or-...', _orKeyObscured,
-              () => setState(() => _orKeyObscured = !_orKeyObscured),
-              _saveOrKey,
-            ),
-          ],
-
-          if (settings.provider == AiProvider.anthropic) ...[
-            _buildSectionLabel('Anthropic API Key', 'Direct API — faster than OpenRouter for Claude models.'),
-            const SizedBox(height: 8),
-            _buildKeyRow(_anthropicKeyController, 'sk-ant-...', _anthropicKeyObscured,
-              () => setState(() => _anthropicKeyObscured = !_anthropicKeyObscured),
-              _saveAnthropicKey,
-            ),
-          ],
-
-          if (settings.provider == AiProvider.gemini) ...[
-            _buildSectionLabel('Google AI Studio API Key', 'Get a free key at aistudio.google.com'),
-            const SizedBox(height: 8),
-            _buildKeyRow(_googleKeyController, 'AIza...', _googleKeyObscured,
-              () => setState(() => _googleKeyObscured = !_googleKeyObscured),
-              _saveGoogleKey,
-            ),
-          ],
-
-          if (settings.provider == AiProvider.ollama) ...[
-            _buildSectionLabel('Ollama (local)', 'Make sure Ollama is running on your device.'),
-            const SizedBox(height: 8),
-            TextField(
-              controller: _ollamaUrlController,
-              decoration: const InputDecoration(
-                labelText: 'Base URL',
-                hintText: 'http://localhost:11434',
-                border: OutlineInputBorder(),
-              ),
-            ),
-            const SizedBox(height: 8),
-            TextField(
-              controller: _ollamaModelController,
-              decoration: const InputDecoration(
-                labelText: 'Model name',
-                hintText: 'llama3.2',
-                border: OutlineInputBorder(),
-              ),
-            ),
-            const SizedBox(height: 8),
-            Align(
-              alignment: Alignment.centerRight,
-              child: FilledButton(onPressed: _saveOllamaSettings, child: const Text('Save')),
-            ),
-          ],
-
-          const SizedBox(height: 24),
-
-          // ── Model selector ─────────────────────────────────────────────────
-          // OpenRouter: searchable live list.
-          // Anthropic: fixed dropdown (haiku / sonnet / opus).
-          // Gemini: fixed dropdown.
-          // Ollama: handled in the URL/model block above.
-          if (settings.provider == AiProvider.openRouter) ...[
-            Text('Model', style: theme.textTheme.titleMedium),
+          const SizedBox(height: 8),
+          Text(
+            _providerDescription(provider),
+            style: theme.textTheme.bodySmall,
+          ),
+          if (provider == AiProvider.ollama) ...[
             const SizedBox(height: 4),
             Text(
-              'Default: ${AppConstants.defaultModel}',
+              'Use HTTPS on mobile. Plain HTTP may be blocked by Android or iOS.',
               style: theme.textTheme.bodySmall?.copyWith(
-                color: theme.colorScheme.onSurface.withValues(alpha: 0.5),
+                color: theme.colorScheme.error,
               ),
             ),
-            const SizedBox(height: 8),
-            if (settings.apiKey == null || settings.apiKey!.isEmpty)
-              Text(
-                'Save an OpenRouter key first to load available models.',
-                style: theme.textTheme.bodySmall?.copyWith(
-                  color: theme.colorScheme.onSurface.withValues(alpha: 0.5),
+          ],
+          const SizedBox(height: 20),
+          Text(
+            provider == AiProvider.ollama
+                ? 'Ollama server URL'
+                : '${_providerName(provider)} API key',
+            style: theme.textTheme.titleMedium,
+          ),
+          const SizedBox(height: 8),
+          Row(
+            children: [
+              Expanded(
+                child: TextField(
+                  controller: _controllerFor(provider),
+                  obscureText:
+                      provider != AiProvider.ollama &&
+                      (_keyObscured[provider] ?? true),
+                  keyboardType: provider == AiProvider.ollama
+                      ? TextInputType.url
+                      : TextInputType.text,
+                  autocorrect: false,
+                  enableSuggestions: false,
+                  decoration: InputDecoration(
+                    hintText: _keyHint(provider),
+                    border: const OutlineInputBorder(),
+                    suffixIcon: provider == AiProvider.ollama
+                        ? null
+                        : IconButton(
+                            onPressed: () => setState(() {
+                              _keyObscured[provider] =
+                                  !(_keyObscured[provider] ?? true);
+                            }),
+                            icon: Icon(
+                              (_keyObscured[provider] ?? true)
+                                  ? Icons.visibility
+                                  : Icons.visibility_off,
+                            ),
+                          ),
+                  ),
                 ),
-              )
-            else ...[
-              TextField(
-                controller: _modelController,
-                decoration: InputDecoration(
-                  hintText: 'Search models...',
-                  border: const OutlineInputBorder(),
-                  suffixIcon: _loadingModels
-                      ? const Padding(
-                          padding: EdgeInsets.all(12),
-                          child: SizedBox(width: 16, height: 16, child: CircularProgressIndicator(strokeWidth: 2)),
-                        )
-                      : _models.isEmpty
-                          ? IconButton(
-                              icon: const Icon(Icons.refresh),
-                              onPressed: () => _fetchModels(settings.apiKey!),
-                            )
-                          : null,
-                ),
-                onTap: () {
-                  if (_models.isEmpty && !_loadingModels) {
-                    _fetchModels(settings.apiKey!);
-                  } else {
-                    _filterModels();
-                  }
-                },
               ),
-              if (_modelError != null) ...[
-                const SizedBox(height: 4),
-                Text(_modelError!, style: TextStyle(color: theme.colorScheme.error, fontSize: 12)),
-              ],
-              if (_filteredModels.isNotEmpty)
-                Container(
-                  margin: const EdgeInsets.only(top: 2),
-                  decoration: BoxDecoration(
-                    border: Border.all(color: theme.colorScheme.outline),
-                    borderRadius: BorderRadius.circular(8),
-                  ),
-                  child: Column(
-                    children: _filteredModels.map((model) => ListTile(
-                      dense: true,
-                      title: Text(model.name, style: theme.textTheme.bodyMedium),
-                      subtitle: Text(model.id, style: theme.textTheme.bodySmall),
-                      onTap: () => _selectModel(model),
-                    )).toList(),
-                  ),
+              const SizedBox(width: 8),
+              FilledButton(
+                onPressed: () => _saveKey(provider),
+                child: const Text('Save'),
+              ),
+            ],
+          ),
+          const SizedBox(height: 24),
+          Row(
+            children: [
+              Expanded(
+                child: Text(
+                  'Available models',
+                  style: theme.textTheme.titleMedium,
+                ),
+              ),
+              if (_loadingModels[provider] == true)
+                const SizedBox(
+                  width: 20,
+                  height: 20,
+                  child: CircularProgressIndicator(strokeWidth: 2),
+                )
+              else
+                IconButton(
+                  tooltip: 'Refresh models',
+                  onPressed: savedKey?.isNotEmpty == true
+                      ? () => _fetchModels(provider, savedKey!)
+                      : null,
+                  icon: const Icon(Icons.refresh),
                 ),
             ],
-            const SizedBox(height: 24),
-          ],
-
-          if (settings.provider == AiProvider.anthropic) ...[
-            Text('Model', style: theme.textTheme.titleMedium),
-            const SizedBox(height: 8),
-            InputDecorator(
-              decoration: const InputDecoration(
-                border: OutlineInputBorder(),
-                contentPadding: EdgeInsets.symmetric(horizontal: 12, vertical: 4),
-              ),
-              child: DropdownButton<String>(
-                value: settings.selectedAnthropicModel,
-                isExpanded: true,
-                underline: const SizedBox.shrink(),
-                items: AppConstants.anthropicModels
-                    .map((m) => DropdownMenuItem(value: m, child: Text(m)))
-                    .toList(),
-                onChanged: (m) {
-                  if (m != null) ref.read(appSettingsProvider.notifier).setAnthropicModel(m);
-                },
-              ),
+          ),
+          const SizedBox(height: 4),
+          Text(
+            'Default: ${_defaultModel(provider)}',
+            style: theme.textTheme.bodySmall,
+          ),
+          const SizedBox(height: 8),
+          if (savedKey?.isNotEmpty != true)
+            Text(
+              provider == AiProvider.ollama
+                  ? 'Save a server URL to load its installed models.'
+                  : 'Save an API key to load the models available to it.',
+            )
+          else if (models.isEmpty && _loadingModels[provider] != true)
+            OutlinedButton.icon(
+              onPressed: () => _fetchModels(provider, savedKey!),
+              icon: const Icon(Icons.cloud_download),
+              label: const Text('Load available models'),
+            )
+          else if (models.isNotEmpty)
+            DropdownButtonFormField<String>(
+              key: ValueKey(provider),
+              initialValue: dropdownValue,
+              isExpanded: true,
+              decoration: const InputDecoration(border: OutlineInputBorder()),
+              hint: const Text('Choose a model'),
+              items: models
+                  .map(
+                    (model) => DropdownMenuItem(
+                      value: model.id,
+                      child: Text(model.name, overflow: TextOverflow.ellipsis),
+                    ),
+                  )
+                  .toList(),
+              onChanged: (value) {
+                if (value != null) _selectModel(provider, value);
+              },
             ),
-            const SizedBox(height: 24),
-          ],
-
-          if (settings.provider == AiProvider.gemini) ...[
-            Text('Model', style: theme.textTheme.titleMedium),
-            const SizedBox(height: 8),
-            InputDecorator(
-              decoration: const InputDecoration(
-                border: OutlineInputBorder(),
-                contentPadding: EdgeInsets.symmetric(horizontal: 12, vertical: 4),
-              ),
-              child: DropdownButton<String>(
-                value: settings.selectedGeminiModel,
-                isExpanded: true,
-                underline: const SizedBox.shrink(),
-                items: AppConstants.geminiModels
-                    .map((m) => DropdownMenuItem(value: m, child: Text(m)))
-                    .toList(),
-                onChanged: (m) {
-                  if (m != null) ref.read(appSettingsProvider.notifier).setGeminiModel(m);
-                },
-              ),
+          if (_modelErrors[provider] case final error?) ...[
+            const SizedBox(height: 6),
+            Text(
+              error,
+              style: TextStyle(color: theme.colorScheme.error, fontSize: 12),
             ),
-            const SizedBox(height: 24),
           ],
-
-          // ── Mature content toggle ──────────────────────────────────────────
+          const SizedBox(height: 24),
+          const Divider(),
           SwitchListTile(
             contentPadding: EdgeInsets.zero,
             title: const Text('Show mature content'),
             subtitle: const Text('Includes sexual and adult facts'),
             value: settings.matureEnabled,
-            onChanged: (val) => ref.read(appSettingsProvider.notifier).setMatureEnabled(val),
+            onChanged: ref.read(appSettingsProvider.notifier).setMatureEnabled,
           ),
-
-          // ── Track seen facts toggle ────────────────────────────────────────
           SwitchListTile(
             contentPadding: EdgeInsets.zero,
             title: const Text('Track seen facts'),
-            subtitle: const Text("Seen facts won't appear again for 2 weeks"),
+            subtitle: const Text('Hide viewed facts for 14 days'),
             value: settings.trackSeen,
-            onChanged: (val) => ref.read(appSettingsProvider.notifier).setTrackSeen(val),
+            onChanged: ref.read(appSettingsProvider.notifier).setTrackSeen,
           ),
-
-          const SizedBox(height: 24),
-
-          // ── Interests ─────────────────────────────────────────────────────
+          const Divider(),
+          const SizedBox(height: 12),
           Text('Interests', style: theme.textTheme.titleMedium),
           const SizedBox(height: 8),
-          _InterestAutocomplete(
-            allTags: _allTags,
-            onAdd: _addInterest,
-          ),
-          const SizedBox(height: 12),
-          if (_interests.isEmpty)
-            Text(
-              'No interests added — showing all facts.',
-              style: theme.textTheme.bodySmall?.copyWith(
-                color: theme.colorScheme.onSurface.withValues(alpha: 0.4),
+          if (_loadingTags)
+            const Center(child: CircularProgressIndicator())
+          else ...[
+            for (final category in _categories) ...[
+              Text(
+                category.group,
+                style: theme.textTheme.labelMedium?.copyWith(
+                  color: theme.colorScheme.primary,
+                ),
               ),
-            )
-          else
+              const SizedBox(height: 6),
+              Wrap(
+                spacing: 8,
+                runSpacing: 8,
+                children: category.tags.map((tag) {
+                  final selected = _interests.contains(tag);
+                  return FilterChip(
+                    label: Text(tag),
+                    selected: selected,
+                    onSelected: (_) =>
+                        selected ? _removeInterest(tag) : _addInterest(tag),
+                  );
+                }).toList(),
+              ),
+              const SizedBox(height: 14),
+            ],
+          ],
+          if (_interests.isNotEmpty) ...[
+            const SizedBox(height: 8),
             Wrap(
               spacing: 8,
               runSpacing: 8,
               children: _interests
-                  .map((i) => InputChip(
-                        label: Text(i),
-                        onDeleted: () => _removeInterest(i),
-                      ))
+                  .map(
+                    (interest) => InputChip(
+                      label: Text(interest),
+                      onDeleted: () => _removeInterest(interest),
+                    ),
+                  )
                   .toList(),
             ),
+          ],
           const SizedBox(height: 24),
         ],
       ),
-    );
-  }
-
-  // ── Helpers ──────────────────────────────────────────────────────────────────
-
-  Widget _buildSectionLabel(String title, String subtitle) {
-    final theme = Theme.of(context);
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        Text(title, style: theme.textTheme.titleMedium),
-        const SizedBox(height: 4),
-        Text(
-          subtitle,
-          style: theme.textTheme.bodySmall?.copyWith(
-            color: theme.colorScheme.onSurface.withValues(alpha: 0.5),
-          ),
-        ),
-      ],
-    );
-  }
-
-  Widget _buildKeyRow(
-    TextEditingController controller,
-    String hint,
-    bool obscured,
-    VoidCallback toggleObscure,
-    VoidCallback onSave,
-  ) {
-    return Row(
-      children: [
-        Expanded(
-          child: TextField(
-            controller: controller,
-            obscureText: obscured,
-            decoration: InputDecoration(
-              hintText: hint,
-              border: const OutlineInputBorder(),
-              suffixIcon: IconButton(
-                icon: Icon(obscured ? Icons.visibility : Icons.visibility_off),
-                onPressed: toggleObscure,
-              ),
-            ),
-          ),
-        ),
-        const SizedBox(width: 8),
-        FilledButton(onPressed: onSave, child: const Text('Save')),
-      ],
-    );
-  }
-}
-
-// ─────────────────────────────────────────────────────────────────────────────
-// _InterestAutocomplete — text field with tag autocomplete suggestions
-// ─────────────────────────────────────────────────────────────────────────────
-class _InterestAutocomplete extends StatelessWidget {
-  final List<String> allTags;
-  final void Function(String) onAdd;
-
-  const _InterestAutocomplete({required this.allTags, required this.onAdd});
-
-  String? _matchTag(String text) {
-    final lower = text.trim().toLowerCase();
-    if (lower.isEmpty) return null;
-    try {
-      return allTags.firstWhere((t) => t.toLowerCase() == lower);
-    } catch (_) {
-      return null;
-    }
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    return Autocomplete<String>(
-      optionsBuilder: (textEditingValue) {
-        final query = textEditingValue.text.trim().toLowerCase();
-        if (query.isEmpty) return const [];
-        return allTags
-            .where((tag) => tag.toLowerCase().contains(query))
-            .take(8);
-      },
-      fieldViewBuilder: (context, controller, focusNode, onFieldSubmitted) {
-        return Row(
-          children: [
-            Expanded(
-              child: TextField(
-                controller: controller,
-                focusNode: focusNode,
-                decoration: const InputDecoration(
-                  hintText: 'Add an interest...',
-                  helperText: 'Pick a tag from the suggestions',
-                  border: OutlineInputBorder(),
-                ),
-                onSubmitted: (value) {
-                  final tag = _matchTag(value);
-                  if (tag != null) {
-                    onAdd(tag);
-                    controller.clear();
-                  }
-                },
-                textInputAction: TextInputAction.done,
-              ),
-            ),
-            const SizedBox(width: 8),
-            ValueListenableBuilder<TextEditingValue>(
-              valueListenable: controller,
-              builder: (context, value, _) {
-                final tag = _matchTag(value.text);
-                return FilledButton(
-                  onPressed: tag != null
-                      ? () {
-                          onAdd(tag);
-                          controller.clear();
-                          FocusScope.of(context).unfocus();
-                        }
-                      : null,
-                  child: const Text('Add'),
-                );
-              },
-            ),
-          ],
-        );
-      },
-      onSelected: (tag) => onAdd(tag),
-      optionsViewBuilder: (context, onSelected, options) {
-        return Align(
-          alignment: Alignment.topLeft,
-          child: Material(
-            elevation: 4,
-            borderRadius: BorderRadius.circular(8),
-            child: ConstrainedBox(
-              constraints: const BoxConstraints(maxWidth: 320, maxHeight: 280),
-              child: ListView.builder(
-                padding: EdgeInsets.zero,
-                shrinkWrap: true,
-                itemCount: options.length,
-                itemBuilder: (context, index) {
-                  final tag = options.elementAt(index);
-                  return ListTile(
-                    dense: true,
-                    title: Text(tag),
-                    onTap: () => onSelected(tag),
-                  );
-                },
-              ),
-            ),
-          ),
-        );
-      },
     );
   }
 }

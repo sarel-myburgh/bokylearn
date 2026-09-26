@@ -48,3 +48,18 @@ app.*.map.json
 Context.md
 projectidea.md
 plan.md
+
+# Secrets and local config — this repo is public, never commit these
+.env
+.env.*
+!.env.example
+*.keystore
+*.jks
+*.p12
+*.pem
+key.properties
+local.properties
+google-services.json
+GoogleService-Info.plist
+secrets.*
+*.secret

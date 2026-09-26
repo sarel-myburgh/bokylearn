@@ -73,7 +73,7 @@ class NoApiKeyScreen extends StatelessWidget {
                     ),
                     const SizedBox(height: 10),
                     Text(
-                      'Add your OpenRouter API key in Settings. OpenRouter is free to sign up — the default model costs nothing.',
+                      'Configure OpenAI, OpenRouter, Anthropic, Gemini, Ollama Cloud, Ollama Local, or OpenCode Go in Settings.',
                       style: theme.textTheme.bodyMedium?.copyWith(
                         color: cream.withValues(alpha: 0.6),
                         height: 1.5,

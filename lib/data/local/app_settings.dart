@@ -22,25 +22,37 @@ import 'package:shared_preferences/shared_preferences.dart';
 import '../../core/constants.dart';
 
 // Which AI backend to use.
-enum AiProvider { openRouter, anthropic, gemini, ollama }
+enum AiProvider {
+  openAi,
+  openRouter,
+  anthropic,
+  gemini,
+  ollamaCloud,
+  ollama,
+  opencodeGo,
+}
 
 // ─────────────────────────────────────────────────────────────────────────────
 // AppSettingsState — immutable snapshot of all user preferences
 // ─────────────────────────────────────────────────────────────────────────────
 class AppSettingsState {
-  // OpenRouter API key (sk-or-...). Null if not yet configured.
-  final String? apiKey;
+  // OpenAI Platform API key. Null if not yet configured.
+  final String? openAiApiKey;
+
+  final String? openRouterApiKey;
 
   // Anthropic direct API key (sk-ant-...). Optional — only needed if the
-  // user wants to use Anthropic models directly instead of via OpenRouter.
+  // user wants to use Anthropic directly.
   final String? anthropicApiKey;
 
   // Which AI backend is currently active.
   final AiProvider provider;
 
   // Selected OpenRouter model ID (e.g. "meta-llama/llama-3.1-8b-instruct:free").
-  // Only relevant when provider == openRouter.
-  final String selectedModel;
+  // Only relevant when provider == openAi.
+  final String selectedOpenAiModel;
+
+  final String selectedOpenRouterModel;
 
   // Selected Anthropic model ID. Only relevant when provider == anthropic.
   final String selectedAnthropicModel;
@@ -51,10 +63,19 @@ class AppSettingsState {
   // Selected Gemini model ID. Only relevant when provider == gemini.
   final String selectedGeminiModel;
 
-  // Base URL for a locally-hosted Ollama instance. Defaults to localhost:11434.
+  final String? opencodeGoApiKey;
+
+  // Selected OpenCode Go model ID.
+  final String selectedOpencodeGoModel;
+
+  // Ollama Cloud API key. Only needed when provider == ollamaCloud.
+  final String? ollamaCloudApiKey;
+
+  // Selected Ollama Cloud model name. Only relevant when provider == ollamaCloud.
+  final String selectedOllamaCloudModel;
+
   final String ollamaBaseUrl;
 
-  // Selected Ollama model name. Only relevant when provider == ollama.
   final String selectedOllamaModel;
 
   // Whether to show facts flagged as mature content. Off by default.
@@ -77,13 +98,19 @@ class AppSettingsState {
   final bool loaded;
 
   const AppSettingsState({
-    this.apiKey,
+    this.openAiApiKey,
+    this.openRouterApiKey,
     this.anthropicApiKey,
-    this.provider = AiProvider.openRouter,
-    this.selectedModel = AppConstants.defaultModel,
+    this.provider = AiProvider.openAi,
+    this.selectedOpenAiModel = AppConstants.defaultOpenAiModel,
+    this.selectedOpenRouterModel = AppConstants.defaultOpenRouterModel,
     this.selectedAnthropicModel = AppConstants.defaultAnthropicModel,
     this.googleApiKey,
     this.selectedGeminiModel = AppConstants.defaultGeminiModel,
+    this.opencodeGoApiKey,
+    this.selectedOpencodeGoModel = AppConstants.defaultOpencodeGoModel,
+    this.ollamaCloudApiKey,
+    this.selectedOllamaCloudModel = AppConstants.defaultOllamaCloudModel,
     this.ollamaBaseUrl = AppConstants.defaultOllamaBaseUrl,
     this.selectedOllamaModel = AppConstants.defaultOllamaModel,
     this.matureEnabled = false,
@@ -101,30 +128,56 @@ class AppSettingsState {
         return anthropicApiKey != null && anthropicApiKey!.isNotEmpty;
       case AiProvider.gemini:
         return googleApiKey != null && googleApiKey!.isNotEmpty;
-      case AiProvider.ollama:
-        return true; // Ollama needs no key — base URL is always set
+      case AiProvider.opencodeGo:
+        return opencodeGoApiKey != null && opencodeGoApiKey!.isNotEmpty;
+      case AiProvider.ollamaCloud:
+        return ollamaCloudApiKey != null && ollamaCloudApiKey!.isNotEmpty;
+      case AiProvider.openAi:
+        return openAiApiKey != null && openAiApiKey!.isNotEmpty;
       case AiProvider.openRouter:
-        return apiKey != null && apiKey!.isNotEmpty;
+        return openRouterApiKey != null && openRouterApiKey!.isNotEmpty;
+      case AiProvider.ollama:
+        return ollamaBaseUrl.trim().isNotEmpty;
     }
   }
 
   // The API key (or empty string) for the currently active provider.
   String get activeApiKey {
     switch (provider) {
-      case AiProvider.anthropic: return anthropicApiKey ?? '';
-      case AiProvider.gemini:    return googleApiKey ?? '';
-      case AiProvider.ollama:    return '';
-      case AiProvider.openRouter: return apiKey ?? '';
+      case AiProvider.anthropic:
+        return anthropicApiKey ?? '';
+      case AiProvider.gemini:
+        return googleApiKey ?? '';
+      case AiProvider.opencodeGo:
+        return opencodeGoApiKey ?? '';
+      case AiProvider.ollamaCloud:
+        return ollamaCloudApiKey ?? '';
+      case AiProvider.openAi:
+        return openAiApiKey ?? '';
+      case AiProvider.openRouter:
+        return openRouterApiKey ?? '';
+      case AiProvider.ollama:
+        return '';
     }
   }
 
   // The model ID for the currently active provider.
   String get activeModel {
     switch (provider) {
-      case AiProvider.anthropic:  return selectedAnthropicModel;
-      case AiProvider.gemini:     return selectedGeminiModel;
-      case AiProvider.ollama:     return selectedOllamaModel;
-      case AiProvider.openRouter: return selectedModel;
+      case AiProvider.anthropic:
+        return selectedAnthropicModel;
+      case AiProvider.gemini:
+        return selectedGeminiModel;
+      case AiProvider.opencodeGo:
+        return selectedOpencodeGoModel;
+      case AiProvider.ollamaCloud:
+        return selectedOllamaCloudModel;
+      case AiProvider.openAi:
+        return selectedOpenAiModel;
+      case AiProvider.openRouter:
+        return selectedOpenRouterModel;
+      case AiProvider.ollama:
+        return selectedOllamaModel;
     }
   }
 
@@ -132,13 +185,19 @@ class AppSettingsState {
   // All other fields carry over from the current state. This is the standard
   // immutable update pattern — avoids accidentally clearing fields.
   AppSettingsState copyWith({
-    String? apiKey,
+    String? openAiApiKey,
+    String? openRouterApiKey,
     String? anthropicApiKey,
     AiProvider? provider,
-    String? selectedModel,
+    String? selectedOpenAiModel,
+    String? selectedOpenRouterModel,
     String? selectedAnthropicModel,
     String? googleApiKey,
     String? selectedGeminiModel,
+    String? opencodeGoApiKey,
+    String? selectedOpencodeGoModel,
+    String? ollamaCloudApiKey,
+    String? selectedOllamaCloudModel,
     String? ollamaBaseUrl,
     String? selectedOllamaModel,
     bool? matureEnabled,
@@ -148,13 +207,23 @@ class AppSettingsState {
     bool? loaded,
   }) {
     return AppSettingsState(
-      apiKey: apiKey ?? this.apiKey,
+      openAiApiKey: openAiApiKey ?? this.openAiApiKey,
+      openRouterApiKey: openRouterApiKey ?? this.openRouterApiKey,
       anthropicApiKey: anthropicApiKey ?? this.anthropicApiKey,
       provider: provider ?? this.provider,
-      selectedModel: selectedModel ?? this.selectedModel,
-      selectedAnthropicModel: selectedAnthropicModel ?? this.selectedAnthropicModel,
+      selectedOpenAiModel: selectedOpenAiModel ?? this.selectedOpenAiModel,
+      selectedOpenRouterModel:
+          selectedOpenRouterModel ?? this.selectedOpenRouterModel,
+      selectedAnthropicModel:
+          selectedAnthropicModel ?? this.selectedAnthropicModel,
       googleApiKey: googleApiKey ?? this.googleApiKey,
       selectedGeminiModel: selectedGeminiModel ?? this.selectedGeminiModel,
+      opencodeGoApiKey: opencodeGoApiKey ?? this.opencodeGoApiKey,
+      selectedOpencodeGoModel:
+          selectedOpencodeGoModel ?? this.selectedOpencodeGoModel,
+      ollamaCloudApiKey: ollamaCloudApiKey ?? this.ollamaCloudApiKey,
+      selectedOllamaCloudModel:
+          selectedOllamaCloudModel ?? this.selectedOllamaCloudModel,
       ollamaBaseUrl: ollamaBaseUrl ?? this.ollamaBaseUrl,
       selectedOllamaModel: selectedOllamaModel ?? this.selectedOllamaModel,
       matureEnabled: matureEnabled ?? this.matureEnabled,
@@ -181,60 +250,111 @@ class AppSettingsNotifier extends StateNotifier<AppSettingsState> {
   // Called once on construction. Every widget watching appSettingsProvider
   // will rebuild when state transitions from loaded=false to loaded=true.
   Future<void> _load() async {
-    final prefs = await SharedPreferences.getInstance();
+    try {
+      final prefs = await SharedPreferences.getInstance();
 
-    // API keys come from secure storage (encrypted).
-    final apiKey      = await _secure.read(key: AppConstants.keyApiKey);
-    final anthropicKey = await _secure.read(key: AppConstants.keyAnthropicApiKey);
-    final googleKey   = await _secure.read(key: AppConstants.keyGoogleApiKey);
+      // API keys come from secure storage (encrypted).
+      final openAiKey = await _secure.read(key: AppConstants.keyOpenAiApiKey);
+      final openRouterKey = await _secure.read(
+        key: AppConstants.keyOpenRouterApiKey,
+      );
+      final anthropicKey = await _secure.read(
+        key: AppConstants.keyAnthropicApiKey,
+      );
+      final googleKey = await _secure.read(key: AppConstants.keyGoogleApiKey);
+      final opencodeGoKey = await _secure.read(
+        key: AppConstants.keyOpencodeGoApiKey,
+      );
+      final ollamaCloudKey = await _secure.read(
+        key: AppConstants.keyOllamaCloudApiKey,
+      );
 
-    // Everything else from SharedPreferences.
-    final providerStr = prefs.getString(AppConstants.keyProvider);
-    final provider = switch (providerStr) {
-      'anthropic' => AiProvider.anthropic,
-      'gemini'    => AiProvider.gemini,
-      'ollama'    => AiProvider.ollama,
-      _           => AiProvider.openRouter,
-    };
-    final model          = prefs.getString(AppConstants.keySelectedModel) ?? AppConstants.defaultModel;
-    final anthropicModel = prefs.getString(AppConstants.keySelectedAnthropicModel) ?? AppConstants.defaultAnthropicModel;
-    final geminiModel    = prefs.getString(AppConstants.keySelectedGeminiModel) ?? AppConstants.defaultGeminiModel;
-    final ollamaUrl      = prefs.getString(AppConstants.keyOllamaBaseUrl) ?? AppConstants.defaultOllamaBaseUrl;
-    final ollamaModel    = prefs.getString(AppConstants.keySelectedOllamaModel) ?? AppConstants.defaultOllamaModel;
-    final mature         = prefs.getBool(AppConstants.keyMatureEnabled) ?? false;
-    final onboarding     = prefs.getBool(AppConstants.keyOnboardingComplete) ?? false;
-    final trackSeen      = prefs.getBool(AppConstants.keyTrackSeen) ?? true;
+      // Everything else from SharedPreferences.
+      final providerStr = prefs.getString(AppConstants.keyProvider);
+      final provider = switch (providerStr) {
+        'anthropic' => AiProvider.anthropic,
+        'gemini' => AiProvider.gemini,
+        'openRouter' => AiProvider.openRouter,
+        'ollama' => AiProvider.ollama,
+        'opencode' || 'opencodeGo' => AiProvider.opencodeGo,
+        'ollamaCloud' => AiProvider.ollamaCloud,
+        _ => AiProvider.openAi,
+      };
+      final openAiModel =
+          prefs.getString(AppConstants.keySelectedOpenAiModel) ??
+          AppConstants.defaultOpenAiModel;
+      final openRouterModel =
+          prefs.getString(AppConstants.keySelectedOpenRouterModel) ??
+          AppConstants.defaultOpenRouterModel;
+      final anthropicModel =
+          prefs.getString(AppConstants.keySelectedAnthropicModel) ??
+          AppConstants.defaultAnthropicModel;
+      final geminiModel =
+          prefs.getString(AppConstants.keySelectedGeminiModel) ??
+          AppConstants.defaultGeminiModel;
+      final opencodeGoModel =
+          prefs.getString(AppConstants.keySelectedOpencodeGoModel) ??
+          AppConstants.defaultOpencodeGoModel;
+      final ollamaCloudModel =
+          prefs.getString(AppConstants.keySelectedOllamaCloudModel) ??
+          AppConstants.defaultOllamaCloudModel;
+      final ollamaBaseUrl =
+          prefs.getString(AppConstants.keyOllamaBaseUrl) ??
+          AppConstants.defaultOllamaBaseUrl;
+      final ollamaModel =
+          prefs.getString(AppConstants.keySelectedOllamaModel) ??
+          AppConstants.defaultOllamaModel;
+      final mature = prefs.getBool(AppConstants.keyMatureEnabled) ?? false;
+      final onboarding =
+          prefs.getBool(AppConstants.keyOnboardingComplete) ?? false;
+      final trackSeen = prefs.getBool(AppConstants.keyTrackSeen) ?? true;
 
-    // Interests are stored as a JSON array of strings.
-    final interestsJson = prefs.getString('interests');
-    final interests = interestsJson != null
-        ? List<String>.from(jsonDecode(interestsJson) as List)
-        : <String>[];
+      // Interests are stored as a JSON array of strings.
+      final interestsJson = prefs.getString('interests');
+      final interests = interestsJson != null
+          ? List<String>.from(jsonDecode(interestsJson) as List)
+          : <String>[];
 
-    state = AppSettingsState(
-      apiKey: apiKey,
-      anthropicApiKey: anthropicKey,
-      provider: provider,
-      selectedModel: model,
-      selectedAnthropicModel: anthropicModel,
-      googleApiKey: googleKey,
-      selectedGeminiModel: geminiModel,
-      ollamaBaseUrl: ollamaUrl,
-      selectedOllamaModel: ollamaModel,
-      matureEnabled: mature,
-      onboardingComplete: onboarding,
-      interests: interests,
-      trackSeen: trackSeen,
-      loaded: true,
-    );
+      state = AppSettingsState(
+        openAiApiKey: openAiKey,
+        openRouterApiKey: openRouterKey,
+        anthropicApiKey: anthropicKey,
+        provider: provider,
+        selectedOpenAiModel: openAiModel,
+        selectedOpenRouterModel: openRouterModel,
+        selectedAnthropicModel: anthropicModel,
+        googleApiKey: googleKey,
+        selectedGeminiModel: geminiModel,
+        opencodeGoApiKey: opencodeGoKey,
+        selectedOpencodeGoModel: opencodeGoModel,
+        ollamaCloudApiKey: ollamaCloudKey,
+        selectedOllamaCloudModel: ollamaCloudModel,
+        ollamaBaseUrl: ollamaBaseUrl,
+        selectedOllamaModel: ollamaModel,
+        matureEnabled: mature,
+        onboardingComplete: onboarding,
+        interests: interests,
+        trackSeen: trackSeen,
+        loaded: true,
+      );
+    } catch (_) {
+      // Never leave the app stuck on its loading spinner if device storage is
+      // corrupt or temporarily unavailable. The user can re-enter settings.
+      state = const AppSettingsState(loaded: true);
+    }
   }
 
   // Each setter writes to storage and updates state immediately so the UI
   // reflects the change without waiting for a round-trip read.
 
-  Future<void> setApiKey(String key) async {
-    await _secure.write(key: AppConstants.keyApiKey, value: key);
-    state = state.copyWith(apiKey: key);
+  Future<void> setOpenAiApiKey(String key) async {
+    await _secure.write(key: AppConstants.keyOpenAiApiKey, value: key);
+    state = state.copyWith(openAiApiKey: key);
+  }
+
+  Future<void> setOpenRouterApiKey(String key) async {
+    await _secure.write(key: AppConstants.keyOpenRouterApiKey, value: key);
+    state = state.copyWith(openRouterApiKey: key);
   }
 
   Future<void> setAnthropicApiKey(String key) async {
@@ -248,10 +368,16 @@ class AppSettingsNotifier extends StateNotifier<AppSettingsState> {
     state = state.copyWith(provider: provider);
   }
 
-  Future<void> setModel(String model) async {
+  Future<void> setOpenAiModel(String model) async {
     final prefs = await SharedPreferences.getInstance();
-    await prefs.setString(AppConstants.keySelectedModel, model);
-    state = state.copyWith(selectedModel: model);
+    await prefs.setString(AppConstants.keySelectedOpenAiModel, model);
+    state = state.copyWith(selectedOpenAiModel: model);
+  }
+
+  Future<void> setOpenRouterModel(String model) async {
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setString(AppConstants.keySelectedOpenRouterModel, model);
+    state = state.copyWith(selectedOpenRouterModel: model);
   }
 
   Future<void> setAnthropicModel(String model) async {
@@ -269,6 +395,28 @@ class AppSettingsNotifier extends StateNotifier<AppSettingsState> {
     final prefs = await SharedPreferences.getInstance();
     await prefs.setString(AppConstants.keySelectedGeminiModel, model);
     state = state.copyWith(selectedGeminiModel: model);
+  }
+
+  Future<void> setOpencodeGoApiKey(String key) async {
+    await _secure.write(key: AppConstants.keyOpencodeGoApiKey, value: key);
+    state = state.copyWith(opencodeGoApiKey: key);
+  }
+
+  Future<void> setOpencodeGoModel(String model) async {
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setString(AppConstants.keySelectedOpencodeGoModel, model);
+    state = state.copyWith(selectedOpencodeGoModel: model);
+  }
+
+  Future<void> setOllamaCloudApiKey(String key) async {
+    await _secure.write(key: AppConstants.keyOllamaCloudApiKey, value: key);
+    state = state.copyWith(ollamaCloudApiKey: key);
+  }
+
+  Future<void> setOllamaCloudModel(String model) async {
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setString(AppConstants.keySelectedOllamaCloudModel, model);
+    state = state.copyWith(selectedOllamaCloudModel: model);
   }
 
   Future<void> setOllamaBaseUrl(String url) async {
@@ -320,5 +468,5 @@ class AppSettingsNotifier extends StateNotifier<AppSettingsState> {
 // changes, or use .notifier to call mutating methods.
 final appSettingsProvider =
     StateNotifierProvider<AppSettingsNotifier, AppSettingsState>(
-  (ref) => AppSettingsNotifier(),
-);
+      (ref) => AppSettingsNotifier(),
+    );

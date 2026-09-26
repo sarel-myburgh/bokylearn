@@ -108,14 +108,16 @@ class _ExpansionScreenState extends ConsumerState<ExpansionScreen> {
     // Track this screen in the session so the user can resume after closing the
     // app. push() updates the in-memory stack synchronously before its first
     // await, so it's safe to fire-and-forget here.
-    SessionService.push(SessionEntry(
-      factId: widget.fact.id,
-      questionAsked: widget.questionAsked,
-      priorQuestions: widget.priorQuestions,
-    ));
+    SessionService.push(
+      SessionEntry(
+        factId: widget.fact.id,
+        questionAsked: widget.questionAsked,
+        priorQuestions: widget.priorQuestions,
+      ),
+    );
 
     // Load current reaction and bookmark state from Hive.
-    _reaction   = FactsDb.getReaction(widget.fact.id);
+    _reaction = FactsDb.getReaction(widget.fact.id);
     _bookmarked = FactsDb.isBookmarked(widget.fact.id);
 
     // For root expansion screens (not follow-up questions), check if the AI
@@ -155,12 +157,18 @@ class _ExpansionScreenState extends ConsumerState<ExpansionScreen> {
     final next = _reaction == reaction ? null : reaction;
 
     // Reverse the old reaction's weight effect before applying the new one.
-    if (_reaction == 'like')    await FactsDb.adjustTagWeights(widget.fact.tags, -0.2);
-    if (_reaction == 'dislike') await FactsDb.adjustTagWeights(widget.fact.tags,  0.3);
+    if (_reaction == 'like') {
+      await FactsDb.adjustTagWeights(widget.fact.tags, -0.2);
+    }
+    if (_reaction == 'dislike') {
+      await FactsDb.adjustTagWeights(widget.fact.tags, 0.3);
+    }
 
     // Apply the new reaction's weight effect.
-    if (next == 'like')    await FactsDb.adjustTagWeights(widget.fact.tags,  0.2);
-    if (next == 'dislike') await FactsDb.adjustTagWeights(widget.fact.tags, -0.3);
+    if (next == 'like') await FactsDb.adjustTagWeights(widget.fact.tags, 0.2);
+    if (next == 'dislike') {
+      await FactsDb.adjustTagWeights(widget.fact.tags, -0.3);
+    }
 
     await FactsDb.setReaction(widget.fact.id, next);
     if (mounted) setState(() => _reaction = next);
@@ -202,18 +210,22 @@ class _ExpansionScreenState extends ConsumerState<ExpansionScreen> {
 
     for (final match in pattern.allMatches(_displayText)) {
       if (match.start > last) {
-        spans.add(TextSpan(
-          text: _displayText.substring(last, match.start),
-          style: base,
-        ));
+        spans.add(
+          TextSpan(
+            text: _displayText.substring(last, match.start),
+            style: base,
+          ),
+        );
       }
       final label = match.group(1)!;
-      final url   = match.group(2)!;
-      spans.add(TextSpan(
-        text: label,
-        style: link,
-        recognizer: TapGestureRecognizer()..onTap = () => _openUrl(url),
-      ));
+      final url = match.group(2)!;
+      spans.add(
+        TextSpan(
+          text: label,
+          style: link,
+          recognizer: TapGestureRecognizer()..onTap = () => _openUrl(url),
+        ),
+      );
       last = match.end;
     }
     if (last < _displayText.length) {
@@ -280,7 +292,8 @@ class _ExpansionScreenState extends ConsumerState<ExpansionScreen> {
       onError: (e) {
         if (!mounted) return;
         setState(() {
-          _error = 'Could not generate content. Check your API key and try again.';
+          _error =
+              'Could not generate content. Check your API key and try again.';
           _done = true;
         });
       },
@@ -291,13 +304,15 @@ class _ExpansionScreenState extends ConsumerState<ExpansionScreen> {
   // The current question is appended to priorQuestions so the AI has the
   // full exploration chain as context.
   void _pushQuestion(String question) {
-    Navigator.of(context).push(MaterialPageRoute(
-      builder: (_) => ExpansionScreen(
-        fact: widget.fact,
-        questionAsked: question,
-        priorQuestions: [...widget.priorQuestions, question],
+    Navigator.of(context).push(
+      MaterialPageRoute(
+        builder: (_) => ExpansionScreen(
+          fact: widget.fact,
+          questionAsked: question,
+          priorQuestions: [...widget.priorQuestions, question],
+        ),
       ),
-    ));
+    );
   }
 
   // Opens a URL in the device's default browser.
@@ -347,7 +362,7 @@ class _ExpansionScreenState extends ConsumerState<ExpansionScreen> {
         client: client,
         onDiveDeeper: (text) {
           Navigator.of(context).pop(); // Close dialog
-          _pushQuestion(text);         // Push new ExpansionScreen
+          _pushQuestion(text); // Push new ExpansionScreen
         },
       ),
     );
@@ -396,10 +411,7 @@ class _ExpansionScreenState extends ConsumerState<ExpansionScreen> {
         leading: const BackButton(),
         actions: [
           // Share button — shares the original fact text and source URL.
-          IconButton(
-            icon: const Icon(Icons.share_outlined),
-            onPressed: _share,
-          ),
+          IconButton(icon: const Icon(Icons.share_outlined), onPressed: _share),
           // Bookmark button — always accessible regardless of scroll position or depth.
           IconButton(
             icon: Icon(
@@ -427,328 +439,374 @@ class _ExpansionScreenState extends ConsumerState<ExpansionScreen> {
       body: RefreshIndicator(
         onRefresh: _refresh,
         child: SingleChildScrollView(
-        physics: const AlwaysScrollableScrollPhysics(),
-        padding: const EdgeInsets.all(20),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-
-            // ── Heading ──────────────────────────────────────────────────────
-            // On the root expansion screen this is the original fact text.
-            // On follow-up / dive-deeper screens it's the question being
-            // answered, since that's the actual topic the user is exploring.
-            Text(
-              widget.questionAsked ?? fact.text,
-              style: theme.textTheme.titleLarge?.copyWith(fontWeight: FontWeight.bold),
-            ),
-
-            const SizedBox(height: 20),
-
-            // ── Image (optional) ─────────────────────────────────────────────
-            // Only shown if the fact has an image URL. Images are specific
-            // (Wikimedia, NASA, etc.) not generic stock photos.
-            if (fact.imageUrl != null) ...[
-              ClipRRect(
-                borderRadius: BorderRadius.circular(12),
-                child: Image.network(
-                  fact.imageUrl!,
-                  width: double.infinity,
-                  fit: BoxFit.cover,
-                  // If the image fails to load, silently hide it.
-                  errorBuilder: (_, _, _) => const SizedBox.shrink(),
+          physics: const AlwaysScrollableScrollPhysics(),
+          padding: const EdgeInsets.all(20),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              // ── Heading ──────────────────────────────────────────────────────
+              // On the root expansion screen this is the original fact text.
+              // On follow-up / dive-deeper screens it's the question being
+              // answered, since that's the actual topic the user is exploring.
+              Text(
+                widget.questionAsked ?? fact.text,
+                style: theme.textTheme.titleLarge?.copyWith(
+                  fontWeight: FontWeight.bold,
                 ),
               ),
-              if (fact.imageCaption != null)
-                Padding(
-                  padding: const EdgeInsets.only(top: 6),
-                  child: Text(
-                    // Show caption and source separated by a middle dot.
-                    [fact.imageCaption, fact.imageSource].whereType<String>().join(' · '),
-                    style: theme.textTheme.bodySmall?.copyWith(
-                      color: theme.colorScheme.onSurface.withValues(alpha: 0.5),
-                    ),
+
+              const SizedBox(height: 20),
+
+              // ── Image (optional) ─────────────────────────────────────────
+              // Only shown on the root expansion screen (questionAsked == null).
+              // Hide on follow-up/pivot screens — the image is specific to
+              // the original fact, not the new branch of the rabbit hole.
+              if (widget.questionAsked == null && fact.imageUrl != null) ...[
+                ClipRRect(
+                  borderRadius: BorderRadius.circular(12),
+                  child: Image.network(
+                    fact.imageUrl!,
+                    width: double.infinity,
+                    fit: BoxFit.cover,
+                    // If the image fails to load, silently hide it.
+                    errorBuilder: (_, _, _) => const SizedBox.shrink(),
                   ),
                 ),
-              const SizedBox(height: 20),
-            ],
-
-            // ── Article area ─────────────────────────────────────────────────
-            // Three states:
-            //   error    → show error message
-            //   !started → show "Connecting to model..." spinner
-            //   default  → show streaming text (updates on every chunk)
-            if (_error != null)
-              Text(_error!, style: TextStyle(color: theme.colorScheme.error))
-            else if (!_started)
-              Row(
-                children: [
-                  const SizedBox(
-                    width: 16,
-                    height: 16,
-                    child: CircularProgressIndicator(strokeWidth: 2),
-                  ),
-                  const SizedBox(width: 12),
-                  Text(
-                    'Connecting to model...',
-                    style: theme.textTheme.bodyMedium?.copyWith(
-                      color: theme.colorScheme.onSurface.withValues(alpha: 0.5),
-                    ),
-                  ),
-                ],
-              )
-            else if (!_done)
-              // While streaming: plain selectable text — partial markdown looks
-              // fine while being typed, and the blinking cursor provides feedback.
-              SelectableText(
-                _displayText,
-                style: theme.textTheme.bodyLarge?.copyWith(height: 1.6),
-              )
-            else
-              // Once done: parse inline markdown links into tappable spans.
-              // SelectableText.rich preserves the "Explain" context menu.
-              SelectableText.rich(
-                _buildArticleSpans(theme),
-                contextMenuBuilder: (ctx, editableTextState) {
-                  final value = editableTextState.textEditingValue;
-                  final sel = value.selection;
-                  final selected = (sel.isValid && !sel.isCollapsed)
-                      ? value.text.substring(sel.start, sel.end).trim()
-                      : '';
-                  return AdaptiveTextSelectionToolbar.buttonItems(
-                    anchors: editableTextState.contextMenuAnchors,
-                    buttonItems: [
-                      if (selected.isNotEmpty)
-                        ContextMenuButtonItem(
-                          label: 'Explain',
-                          onPressed: () {
-                            ContextMenuController.removeAny();
-                            _showExplanation(selected);
-                          },
+                if (fact.imageCaption != null)
+                  Padding(
+                    padding: const EdgeInsets.only(top: 6),
+                    child: Text(
+                      // Show caption and source separated by a middle dot.
+                      [
+                        fact.imageCaption,
+                        fact.imageSource,
+                      ].whereType<String>().join(' · '),
+                      style: theme.textTheme.bodySmall?.copyWith(
+                        color: theme.colorScheme.onSurface.withValues(
+                          alpha: 0.5,
                         ),
-                      ...editableTextState.contextMenuButtonItems,
-                    ],
-                  );
-                },
-              ),
-
-            // Blinking cursor shown while the stream is in progress.
-            if (_started && !_done && _error == null) ...[
-              const SizedBox(height: 4),
-              _BlinkingCursor(),
-            ],
-
-            // ── Post-stream content ──────────────────────────────────────────
-            // Only rendered after the stream completes and the output is parsed.
-            if (_done && _parsed != null) ...[
-              const SizedBox(height: 20),
-
-              // Like / Dislike row — lets the user react after reading the article.
-              // Same weight adjustment logic as feed cards.
-              Row(
-                children: [
-                  IconButton(
-                    icon: Icon(
-                      _reaction == 'like' ? Icons.thumb_up : Icons.thumb_up_outlined,
-                      color: _reaction == 'like' ? const Color(0xFFDA7422) : null,
-                    ),
-                    onPressed: () => _toggleReaction('like'),
-                  ),
-                  IconButton(
-                    icon: Icon(
-                      _reaction == 'dislike' ? Icons.thumb_down : Icons.thumb_down_outlined,
-                      color: _reaction == 'dislike' ? const Color(0xFFDA7422) : null,
-                    ),
-                    onPressed: () => _toggleReaction('dislike'),
-                  ),
-                ],
-              ),
-
-              const SizedBox(height: 8),
-
-              // Further reading pills — one per entry in the further_reading array.
-              // Only shown on root expansion screens (not follow-up questions).
-              if (widget.questionAsked == null &&
-                  fact.furtherReadingUrls.isNotEmpty) ...[
-                Text(
-                  'Further reading',
-                  style: theme.textTheme.titleMedium?.copyWith(fontWeight: FontWeight.bold),
-                ),
-                const SizedBox(height: 10),
-                Wrap(
-                  spacing: 8,
-                  runSpacing: 8,
-                  children: [
-                    for (var i = 0; i < fact.furtherReadingUrls.length; i++)
-                      _FurtherReadingChip(
-                        url: fact.furtherReadingUrls[i],
-                        title: i < fact.furtherReadingTitles.length
-                            ? fact.furtherReadingTitles[i]
-                            : fact.furtherReadingUrls[i],
-                        onPressed: () => _openUrl(fact.furtherReadingUrls[i]),
                       ),
-                  ],
-                ),
+                    ),
+                  ),
                 const SizedBox(height: 20),
               ],
 
-              const SizedBox(height: 28),
-
-              // Follow-up question chips — each tappable, pushes a new screen.
-              if (_parsed!.questions.isNotEmpty) ...[
-                Text(
-                  'Dive deeper',
-                  style: theme.textTheme.titleMedium?.copyWith(fontWeight: FontWeight.bold),
+              // ── Article area ─────────────────────────────────────────────────
+              // Three states:
+              //   error    → show error message
+              //   !started → show "Connecting to model..." spinner
+              //   default  → show streaming text (updates on every chunk)
+              if (_error != null)
+                Text(_error!, style: TextStyle(color: theme.colorScheme.error))
+              else if (!_started)
+                Row(
+                  children: [
+                    const SizedBox(
+                      width: 16,
+                      height: 16,
+                      child: CircularProgressIndicator(strokeWidth: 2),
+                    ),
+                    const SizedBox(width: 12),
+                    Text(
+                      'Connecting to model...',
+                      style: theme.textTheme.bodyMedium?.copyWith(
+                        color: theme.colorScheme.onSurface.withValues(
+                          alpha: 0.5,
+                        ),
+                      ),
+                    ),
+                  ],
+                )
+              else if (!_done)
+                // While streaming: plain selectable text — partial markdown looks
+                // fine while being typed, and the blinking cursor provides feedback.
+                SelectableText(
+                  _displayText,
+                  style: theme.textTheme.bodyLarge?.copyWith(height: 1.6),
+                )
+              else
+                // Once done: parse inline markdown links into tappable spans.
+                // SelectableText.rich preserves the "Explain" context menu.
+                SelectableText.rich(
+                  _buildArticleSpans(theme),
+                  contextMenuBuilder: (ctx, editableTextState) {
+                    final value = editableTextState.textEditingValue;
+                    final sel = value.selection;
+                    final selected = (sel.isValid && !sel.isCollapsed)
+                        ? value.text.substring(sel.start, sel.end).trim()
+                        : '';
+                    return AdaptiveTextSelectionToolbar.buttonItems(
+                      anchors: editableTextState.contextMenuAnchors,
+                      buttonItems: [
+                        if (selected.isNotEmpty)
+                          ContextMenuButtonItem(
+                            label: 'Explain',
+                            onPressed: () {
+                              ContextMenuController.removeAny();
+                              _showExplanation(selected);
+                            },
+                          ),
+                        ...editableTextState.contextMenuButtonItems,
+                      ],
+                    );
+                  },
                 ),
-                const SizedBox(height: 10),
-                ..._parsed!.questions.map((q) => Padding(
+
+              // Blinking cursor shown while the stream is in progress.
+              if (_started && !_done && _error == null) ...[
+                const SizedBox(height: 4),
+                _BlinkingCursor(),
+              ],
+
+              // ── Post-stream content ──────────────────────────────────────────
+              // Only rendered after the stream completes and the output is parsed.
+              if (_done && _parsed != null) ...[
+                const SizedBox(height: 20),
+
+                // Like / Dislike row — lets the user react after reading the article.
+                // Same weight adjustment logic as feed cards.
+                Row(
+                  children: [
+                    IconButton(
+                      icon: Icon(
+                        _reaction == 'like'
+                            ? Icons.thumb_up
+                            : Icons.thumb_up_outlined,
+                        color: _reaction == 'like'
+                            ? const Color(0xFFDA7422)
+                            : null,
+                      ),
+                      onPressed: () => _toggleReaction('like'),
+                    ),
+                    IconButton(
+                      icon: Icon(
+                        _reaction == 'dislike'
+                            ? Icons.thumb_down
+                            : Icons.thumb_down_outlined,
+                        color: _reaction == 'dislike'
+                            ? const Color(0xFFDA7422)
+                            : null,
+                      ),
+                      onPressed: () => _toggleReaction('dislike'),
+                    ),
+                  ],
+                ),
+
+                const SizedBox(height: 8),
+
+                // Further reading pills — one per entry in the further_reading array.
+                // Only shown on root expansion screens (not follow-up questions).
+                if (widget.questionAsked == null &&
+                    fact.furtherReadingUrls.isNotEmpty) ...[
+                  Text(
+                    'Further reading',
+                    style: theme.textTheme.titleMedium?.copyWith(
+                      fontWeight: FontWeight.bold,
+                    ),
+                  ),
+                  const SizedBox(height: 10),
+                  Wrap(
+                    spacing: 8,
+                    runSpacing: 8,
+                    children: [
+                      for (var i = 0; i < fact.furtherReadingUrls.length; i++)
+                        _FurtherReadingChip(
+                          url: fact.furtherReadingUrls[i],
+                          title: i < fact.furtherReadingTitles.length
+                              ? fact.furtherReadingTitles[i]
+                              : fact.furtherReadingUrls[i],
+                          onPressed: () => _openUrl(fact.furtherReadingUrls[i]),
+                        ),
+                    ],
+                  ),
+                  const SizedBox(height: 20),
+                ],
+
+                const SizedBox(height: 28),
+
+                // Follow-up question chips — each tappable, pushes a new screen.
+                if (_parsed!.questions.isNotEmpty) ...[
+                  Text(
+                    'Dive deeper',
+                    style: theme.textTheme.titleMedium?.copyWith(
+                      fontWeight: FontWeight.bold,
+                    ),
+                  ),
+                  const SizedBox(height: 10),
+                  ..._parsed!.questions.map(
+                    (q) => Padding(
                       padding: const EdgeInsets.only(bottom: 8),
                       child: InkWell(
                         borderRadius: BorderRadius.circular(8),
                         onTap: () => _pushQuestion(q),
                         child: Container(
                           width: double.infinity,
-                          padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+                          padding: const EdgeInsets.symmetric(
+                            horizontal: 14,
+                            vertical: 12,
+                          ),
                           decoration: BoxDecoration(
                             border: Border.all(
-                              color: theme.colorScheme.outline.withValues(alpha: 0.5),
+                              color: theme.colorScheme.outline.withValues(
+                                alpha: 0.5,
+                              ),
                             ),
                             borderRadius: BorderRadius.circular(8),
                           ),
                           child: Row(
                             children: [
-                              Expanded(child: Text(q, style: theme.textTheme.bodyMedium)),
+                              Expanded(
+                                child: Text(
+                                  q,
+                                  style: theme.textTheme.bodyMedium,
+                                ),
+                              ),
                               Icon(
                                 Icons.chevron_right,
-                                color: theme.colorScheme.onSurface.withValues(alpha: 0.4),
+                                color: theme.colorScheme.onSurface.withValues(
+                                  alpha: 0.4,
+                                ),
                               ),
                             ],
                           ),
                         ),
                       ),
-                    )),
-              ],
-
-              const SizedBox(height: 20),
-
-              // Custom question input — pushes a new ExpansionScreen on submit.
-              Text(
-                'Ask your own question',
-                style: theme.textTheme.titleMedium?.copyWith(fontWeight: FontWeight.bold),
-              ),
-              const SizedBox(height: 10),
-              Row(
-                children: [
-                  Expanded(
-                    child: TextField(
-                      controller: _questionController,
-                      decoration: const InputDecoration(
-                        hintText: 'What else do you want to know?',
-                        border: OutlineInputBorder(),
-                      ),
-                      textInputAction: TextInputAction.send,
-                      onSubmitted: (_) => _submitCustomQuestion(),
                     ),
-                  ),
-                  const SizedBox(width: 8),
-                  FilledButton(
-                    style: FilledButton.styleFrom(
-                      backgroundColor: const Color(0xFFDA7422),
-                      foregroundColor: const Color(0xFFFFFBDB),
-                    ),
-                    onPressed: _submitCustomQuestion,
-                    child: const Icon(Icons.arrow_forward),
                   ),
                 ],
-              ),
 
-              const SizedBox(height: 32),
+                const SizedBox(height: 20),
 
-              // Attribution credit.
-              if (fact.credit != null)
+                // Custom question input — pushes a new ExpansionScreen on submit.
                 Text(
-                  'Source: ${fact.credit}',
-                  style: theme.textTheme.bodySmall?.copyWith(
-                    color: theme.colorScheme.onSurface.withValues(alpha: 0.3),
+                  'Ask your own question',
+                  style: theme.textTheme.titleMedium?.copyWith(
+                    fontWeight: FontWeight.bold,
                   ),
                 ),
-
-              // Tags — all of them, shown at the bottom of root screens only.
-              if (widget.questionAsked == null && fact.tags.isNotEmpty) ...[
-                const SizedBox(height: 16),
-                Text(
-                  'Tags',
-                  style: theme.textTheme.labelSmall?.copyWith(
-                    color: theme.colorScheme.onSurface.withValues(alpha: 0.4),
-                    letterSpacing: 0.8,
-                  ),
-                ),
-                const SizedBox(height: 6),
-                Wrap(
-                  spacing: 6,
-                  runSpacing: 6,
+                const SizedBox(height: 10),
+                Row(
                   children: [
-                    for (final tag in fact.tags)
-                      Container(
-                        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-                        decoration: BoxDecoration(
-                          color: theme.colorScheme.primaryContainer,
-                          borderRadius: BorderRadius.circular(20),
+                    Expanded(
+                      child: TextField(
+                        controller: _questionController,
+                        decoration: const InputDecoration(
+                          hintText: 'What else do you want to know?',
+                          border: OutlineInputBorder(),
                         ),
-                        child: Text(
-                          tag.replaceAll('_', ' '),
-                          style: theme.textTheme.labelSmall?.copyWith(
-                            color: theme.colorScheme.onPrimaryContainer,
+                        textInputAction: TextInputAction.send,
+                        onSubmitted: (_) => _submitCustomQuestion(),
+                      ),
+                    ),
+                    const SizedBox(width: 8),
+                    FilledButton(
+                      style: FilledButton.styleFrom(
+                        backgroundColor: const Color(0xFFDA7422),
+                        foregroundColor: const Color(0xFFFFFBDB),
+                      ),
+                      onPressed: _submitCustomQuestion,
+                      child: const Icon(Icons.arrow_forward),
+                    ),
+                  ],
+                ),
+
+                const SizedBox(height: 32),
+
+                // Attribution credit.
+                if (fact.credit != null)
+                  Text(
+                    'Source: ${fact.credit}',
+                    style: theme.textTheme.bodySmall?.copyWith(
+                      color: theme.colorScheme.onSurface.withValues(alpha: 0.3),
+                    ),
+                  ),
+
+                // Tags — all of them, shown at the bottom of root screens only.
+                if (widget.questionAsked == null && fact.tags.isNotEmpty) ...[
+                  const SizedBox(height: 16),
+                  Text(
+                    'Tags',
+                    style: theme.textTheme.labelSmall?.copyWith(
+                      color: theme.colorScheme.onSurface.withValues(alpha: 0.4),
+                      letterSpacing: 0.8,
+                    ),
+                  ),
+                  const SizedBox(height: 6),
+                  Wrap(
+                    spacing: 6,
+                    runSpacing: 6,
+                    children: [
+                      for (final tag in fact.tags)
+                        Container(
+                          padding: const EdgeInsets.symmetric(
+                            horizontal: 8,
+                            vertical: 4,
+                          ),
+                          decoration: BoxDecoration(
+                            color: theme.colorScheme.primaryContainer,
+                            borderRadius: BorderRadius.circular(20),
+                          ),
+                          child: Text(
+                            tag.replaceAll('_', ' '),
+                            style: theme.textTheme.labelSmall?.copyWith(
+                              color: theme.colorScheme.onPrimaryContainer,
+                            ),
                           ),
                         ),
-                      ),
-                  ],
-                ),
-              ],
+                    ],
+                  ),
+                ],
 
-              // Fact ID — tappable to copy; for reporting issues.
-              const SizedBox(height: 16),
-              GestureDetector(
-                onTap: () {
-                  Clipboard.setData(ClipboardData(text: fact.id));
-                  ScaffoldMessenger.of(context).showSnackBar(
-                    const SnackBar(
-                      content: Text('Fact ID copied'),
-                      duration: Duration(seconds: 2),
-                    ),
-                  );
-                },
-                child: Row(
-                  children: [
-                    Icon(
-                      Icons.fingerprint,
-                      size: 13,
-                      color: theme.colorScheme.onSurface.withValues(alpha: 0.25),
-                    ),
-                    const SizedBox(width: 5),
-                    Expanded(
-                      child: Text(
-                        fact.id,
-                        style: theme.textTheme.labelSmall?.copyWith(
-                          color: theme.colorScheme.onSurface.withValues(alpha: 0.25),
-                          fontFamily: 'monospace',
+                // Fact ID — tappable to copy; for reporting issues.
+                const SizedBox(height: 16),
+                GestureDetector(
+                  onTap: () {
+                    Clipboard.setData(ClipboardData(text: fact.id));
+                    ScaffoldMessenger.of(context).showSnackBar(
+                      const SnackBar(
+                        content: Text('Fact ID copied'),
+                        duration: Duration(seconds: 2),
+                      ),
+                    );
+                  },
+                  child: Row(
+                    children: [
+                      Icon(
+                        Icons.fingerprint,
+                        size: 13,
+                        color: theme.colorScheme.onSurface.withValues(
+                          alpha: 0.25,
                         ),
-                        overflow: TextOverflow.ellipsis,
                       ),
-                    ),
-                    Icon(
-                      Icons.copy,
-                      size: 13,
-                      color: theme.colorScheme.onSurface.withValues(alpha: 0.25),
-                    ),
-                  ],
+                      const SizedBox(width: 5),
+                      Expanded(
+                        child: Text(
+                          fact.id,
+                          style: theme.textTheme.labelSmall?.copyWith(
+                            color: theme.colorScheme.onSurface.withValues(
+                              alpha: 0.25,
+                            ),
+                            fontFamily: 'monospace',
+                          ),
+                          overflow: TextOverflow.ellipsis,
+                        ),
+                      ),
+                      Icon(
+                        Icons.copy,
+                        size: 13,
+                        color: theme.colorScheme.onSurface.withValues(
+                          alpha: 0.25,
+                        ),
+                      ),
+                    ],
+                  ),
                 ),
-              ),
 
-              const SizedBox(height: 8),
+                const SizedBox(height: 8),
+              ],
             ],
-          ],
+          ),
         ),
-      ),
       ),
     );
   }
@@ -782,7 +840,8 @@ class _FurtherReadingChip extends StatelessWidget {
               faviconUrl,
               width: 16,
               height: 16,
-              errorBuilder: (_, e, st) => const Icon(Icons.open_in_new, size: 14),
+              errorBuilder: (_, e, st) =>
+                  const Icon(Icons.open_in_new, size: 14),
             )
           : const Icon(Icons.open_in_new, size: 14),
       label: Text(title, maxLines: 1, overflow: TextOverflow.ellipsis),
@@ -829,10 +888,19 @@ class _ExplanationDialogState extends State<_ExplanationDialog> {
         .listen(
           (chunk) {
             _buffer.write(chunk);
-            if (mounted) setState(() { _started = true; _text = _buffer.toString(); });
+            if (mounted) {
+              setState(() {
+                _started = true;
+                _text = _buffer.toString();
+              });
+            }
           },
-          onDone: () { if (mounted) setState(() => _done = true); },
-          onError: (_) { if (mounted) setState(() => _done = true); },
+          onDone: () {
+            if (mounted) setState(() => _done = true);
+          },
+          onError: (_) {
+            if (mounted) setState(() => _done = true);
+          },
         );
   }
 
@@ -875,22 +943,25 @@ class _ExplanationDialogState extends State<_ExplanationDialog> {
 
                 // Explanation body — spinner until first token arrives.
                 if (!_started)
-                  Row(children: [
-                    const SizedBox(
-                      width: 16, height: 16,
-                      child: CircularProgressIndicator(
-                        strokeWidth: 2,
-                        color: Color(0xFFDA7422),
+                  Row(
+                    children: [
+                      const SizedBox(
+                        width: 16,
+                        height: 16,
+                        child: CircularProgressIndicator(
+                          strokeWidth: 2,
+                          color: Color(0xFFDA7422),
+                        ),
                       ),
-                    ),
-                    const SizedBox(width: 12),
-                    Text(
-                      'Thinking...',
-                      style: theme.textTheme.bodyMedium?.copyWith(
-                        color: const Color(0xFF30362F).withValues(alpha: 0.5),
+                      const SizedBox(width: 12),
+                      Text(
+                        'Thinking...',
+                        style: theme.textTheme.bodyMedium?.copyWith(
+                          color: const Color(0xFF30362F).withValues(alpha: 0.5),
+                        ),
                       ),
-                    ),
-                  ])
+                    ],
+                  )
                 else
                   Text(
                     _text,

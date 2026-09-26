@@ -1,13 +1,16 @@
+import 'dart:convert';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:http/http.dart' as http;
 import '../../core/constants.dart';
 import '../../data/local/app_settings.dart';
 
-const _suggestedTopics = [
-  'Animals', 'Space', 'History', 'Science', 'Technology',
-  'Food', 'Movies & TV', 'Music', 'Psychology', 'Health',
-  'Art', 'Economics',
-];
+class TagCategory {
+  final String group;
+  final List<String> tags;
+
+  const TagCategory({required this.group, required this.tags});
+}
 
 class OnboardingScreen extends ConsumerStatefulWidget {
   const OnboardingScreen({super.key});
@@ -17,28 +20,47 @@ class OnboardingScreen extends ConsumerStatefulWidget {
 }
 
 class _OnboardingScreenState extends ConsumerState<OnboardingScreen> {
-  final _controller = TextEditingController();
-  final List<String> _interests = [];
+  List<TagCategory> _categories = [];
+  bool _loading = true;
+  final Set<String> _selectedTags = {};
 
-  void _addInterest([String? text]) {
-    final value = (text ?? _controller.text).trim();
-    if (value.isEmpty || _interests.contains(value)) return;
-    setState(() => _interests.add(value));
-    if (text == null) _controller.clear();
+  @override
+  void initState() {
+    super.initState();
+    _fetchTags();
   }
 
-  void _removeInterest(String interest) {
-    setState(() => _interests.remove(interest));
+  Future<void> _fetchTags() async {
+    try {
+      final response = await http.get(Uri.parse(AppConstants.tagsJsonUrl));
+      if (response.statusCode != 200) {
+        setState(() => _loading = false);
+        return;
+      }
+      final data = jsonDecode(response.body) as Map<String, dynamic>;
+      final raw = (data['categories'] as List<dynamic>).cast<Map<String, dynamic>>();
+      final cats = raw.map((c) => TagCategory(
+        group: c['group'] as String,
+        tags: (c['tags'] as List<dynamic>).cast<String>(),
+      )).toList();
+      setState(() { _categories = cats; _loading = false; });
+    } catch (_) {
+      setState(() => _loading = false);
+    }
+  }
+
+  void _toggleTag(String tag) {
+    setState(() {
+      if (_selectedTags.contains(tag)) {
+        _selectedTags.remove(tag);
+      } else {
+        _selectedTags.add(tag);
+      }
+    });
   }
 
   Future<void> _finish() async {
-    await ref.read(appSettingsProvider.notifier).completeOnboarding(_interests);
-  }
-
-  @override
-  void dispose() {
-    _controller.dispose();
-    super.dispose();
+    await ref.read(appSettingsProvider.notifier).completeOnboarding(_selectedTags.toList());
   }
 
   @override
@@ -56,7 +78,6 @@ class _OnboardingScreenState extends ConsumerState<OnboardingScreen> {
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              // Logo + title
               Center(
                 child: Column(
                   children: [
@@ -92,113 +113,56 @@ class _OnboardingScreenState extends ConsumerState<OnboardingScreen> {
               ),
               const SizedBox(height: 8),
               Text(
-                'Tell us your interests and we\'ll tailor your feed. Be as specific as you like.',
+                'Pick topics you like. We\'ll tailor your feed.',
                 style: theme.textTheme.bodyMedium?.copyWith(
                   color: cream.withValues(alpha: 0.6),
                 ),
               ),
 
-              const SizedBox(height: 20),
-
-              // Quick-tap topic suggestions
-              Text(
-                'Quick picks',
-                style: theme.textTheme.labelMedium?.copyWith(
-                  color: cream.withValues(alpha: 0.5),
-                  letterSpacing: 0.8,
-                ),
-              ),
-              const SizedBox(height: 8),
-              Wrap(
-                spacing: 8,
-                runSpacing: 8,
-                children: _suggestedTopics.map((topic) {
-                  final selected = _interests.contains(topic);
-                  return FilterChip(
-                    label: Text(topic),
-                    selected: selected,
-                    onSelected: (_) => selected
-                        ? _removeInterest(topic)
-                        : _addInterest(topic),
-                    selectedColor: orange,
-                    checkmarkColor: cream,
-                    labelStyle: TextStyle(
-                      color: selected ? cream : cream.withValues(alpha: 0.8),
-                    ),
-                    backgroundColor: dark.withValues(alpha: 0.0),
-                    side: BorderSide(
-                      color: selected ? orange : cream.withValues(alpha: 0.3),
-                    ),
-                  );
-                }).toList(),
-              ),
-
               const SizedBox(height: 24),
 
-              // Custom interest input
-              Text(
-                'Or type your own',
-                style: theme.textTheme.labelMedium?.copyWith(
-                  color: cream.withValues(alpha: 0.5),
-                  letterSpacing: 0.8,
-                ),
-              ),
-              const SizedBox(height: 8),
-              Row(
-                children: [
-                  Expanded(
-                    child: TextField(
-                      controller: _controller,
-                      style: const TextStyle(color: cream),
-                      cursorColor: orange,
-                      decoration: InputDecoration(
-                        hintText: 'e.g. Roman history, Pokemon TV show',
-                        hintStyle: TextStyle(color: cream.withValues(alpha: 0.35)),
-                        enabledBorder: OutlineInputBorder(
-                          borderSide: BorderSide(color: cream.withValues(alpha: 0.3)),
-                          borderRadius: BorderRadius.circular(8),
-                        ),
-                        focusedBorder: OutlineInputBorder(
-                          borderSide: const BorderSide(color: orange),
-                          borderRadius: BorderRadius.circular(8),
-                        ),
-                      ),
-                      onSubmitted: (_) => _addInterest(),
-                      textInputAction: TextInputAction.done,
+              if (_loading)
+                const Center(
+                  child: Padding(
+                    padding: EdgeInsets.all(48),
+                    child: CircularProgressIndicator(color: orange),
+                  ),
+                )
+              else ...[
+                for (final cat in _categories) ...[
+                  Text(
+                    cat.group,
+                    style: theme.textTheme.labelLarge?.copyWith(
+                      color: orange,
+                      letterSpacing: 0.8,
                     ),
                   ),
-                  const SizedBox(width: 8),
-                  FilledButton(
-                    style: FilledButton.styleFrom(
-                      backgroundColor: orange,
-                      foregroundColor: cream,
-                    ),
-                    onPressed: _addInterest,
-                    child: const Text('Add'),
+                  const SizedBox(height: 8),
+                  Wrap(
+                    spacing: 8,
+                    runSpacing: 8,
+                    children: cat.tags.map((tag) {
+                      final selected = _selectedTags.contains(tag);
+                      return FilterChip(
+                        label: Text(tag),
+                        selected: selected,
+                        onSelected: (_) => _toggleTag(tag),
+                        selectedColor: orange,
+                        checkmarkColor: cream,
+                        labelStyle: TextStyle(
+                          color: selected ? cream : cream.withValues(alpha: 0.8),
+                          fontWeight: selected ? FontWeight.w600 : FontWeight.normal,
+                        ),
+                        backgroundColor: dark.withValues(alpha: 0.0),
+                        side: const BorderSide(color: orange),
+                      );
+                    }).toList(),
                   ),
+                  const SizedBox(height: 20),
                 ],
-              ),
-
-              if (_interests.isNotEmpty) ...[
-                const SizedBox(height: 16),
-                Wrap(
-                  spacing: 8,
-                  runSpacing: 8,
-                  children: _interests
-                      .where((i) => !_suggestedTopics.contains(i))
-                      .map((interest) => InputChip(
-                            label: Text(interest,
-                                style: const TextStyle(color: cream)),
-                            backgroundColor: orange.withValues(alpha: 0.2),
-                            side: const BorderSide(color: orange),
-                            deleteIconColor: cream.withValues(alpha: 0.7),
-                            onDeleted: () => _removeInterest(interest),
-                          ))
-                      .toList(),
-                ),
               ],
 
-              const SizedBox(height: 36),
+              const SizedBox(height: 12),
 
               SizedBox(
                 width: double.infinity,
@@ -212,7 +176,9 @@ class _OnboardingScreenState extends ConsumerState<OnboardingScreen> {
                     ),
                   ),
                   onPressed: _finish,
-                  child: const Text('Start learning'),
+                  child: Text(
+                    _selectedTags.isEmpty ? 'Start learning' : 'Start learning (${_selectedTags.length} selected)',
+                  ),
                 ),
               ),
               const SizedBox(height: 8),
